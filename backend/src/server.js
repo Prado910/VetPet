@@ -5,6 +5,7 @@ const cors = require("cors");
 
 const clientesRoutes = require("./routes/clientes.routes");
 const mascotasRoutes = require("./routes/mascotas.routes");
+const citasRoutes = require("./routes/citas.routes");
 
 const app = express();
 
@@ -19,6 +20,7 @@ app.get("/", (req, res) => {
 
 app.use("/api/clientes", clientesRoutes);
 app.use("/api/mascotas", mascotasRoutes);
+app.use("/api/citas", citasRoutes);
 
 const PORT = process.env.PORT || 3000;
 

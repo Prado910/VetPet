@@ -116,3 +116,92 @@ export function deleteMascota(id: string) {
     method: "DELETE",
   });
 }
+
+export type EstadoCita =
+  | "PROGRAMADA"
+  | "CONFIRMADA"
+  | "ATENDIDA"
+  | "CANCELADA"
+  | "REPROGRAMADA";
+
+export interface Cita {
+  id: string;
+  mascotaId: string;
+  mascotaNombre: string;
+  mascotaEspecie?: string | null;
+  clienteId: string;
+  clienteNombre: string;
+  clienteTelefono?: string | null;
+  veterinarioId: string;
+  veterinarioNombre: string;
+  recepcionistaId: string;
+  recepcionistaNombre: string;
+  fecha: string;
+  hora: string;
+  motivo?: string | null;
+  estado: EstadoCita;
+}
+
+export interface CitaInput {
+  id?: string;
+  mascotaId: string;
+  veterinarioId: string;
+  recepcionistaId: string;
+  fecha: string;
+  hora: string;
+  motivo?: string | null;
+  estado: EstadoCita;
+}
+
+export interface CatalogoMascotaCita {
+  id: string;
+  nombre: string;
+  especie?: string | null;
+  clienteNombre?: string | null;
+}
+
+export interface CatalogoVeterinarioCita {
+  id: string;
+  nombre: string;
+  especialidad?: string | null;
+}
+
+export interface CatalogoRecepcionistaCita {
+  id: string;
+  nombre: string;
+  turno?: string | null;
+}
+
+export interface CatalogosCitas {
+  mascotas: CatalogoMascotaCita[];
+  veterinarios: CatalogoVeterinarioCita[];
+  recepcionistas: CatalogoRecepcionistaCita[];
+}
+
+export function getCitas() {
+  return request<Cita[]>("/citas");
+}
+
+export function getCatalogosCitas() {
+  return request<CatalogosCitas>("/citas/catalogos");
+}
+
+export function createCita(cita: CitaInput) {
+  return request<{ message: string }>("/citas", {
+    method: "POST",
+    body: JSON.stringify(cita),
+  });
+}
+
+export function updateCita(id: string, cita: CitaInput) {
+  return request<{ message: string }>(`/citas/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(cita),
+  });
+}
+
+export function deleteCita(id: string) {
+  return request<{ message: string }>(`/citas/${id}`, {
+    method: "DELETE",
+  });
+}
