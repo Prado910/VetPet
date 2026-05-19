@@ -4,6 +4,7 @@ const express = require("express");
 const cors = require("cors");
 
 const clientesRoutes = require("./routes/clientes.routes");
+const mascotasRoutes = require("./routes/mascotas.routes");
 
 const app = express();
 
@@ -17,6 +18,7 @@ app.get("/", (req, res) => {
 });
 
 app.use("/api/clientes", clientesRoutes);
+app.use("/api/mascotas", mascotasRoutes);
 
 const PORT = process.env.PORT || 3000;
 
