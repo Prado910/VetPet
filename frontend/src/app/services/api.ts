@@ -605,3 +605,285 @@ export function deleteConsulta(id: string) {
     method: "DELETE",
   });
 }
+
+export type EstadoDiagnostico = "PRESUNTIVO" | "CONFIRMADO" | "DESCARTADO";
+
+export type TipoTratamiento =
+  | "MEDICACION"
+  | "OBSERVACION"
+  | "TERAPIA"
+  | "PROCEDIMIENTO_AMBULATORIO"
+  | "PLAN_VACUNACION";
+
+export type EstadoTratamiento =
+  | "ACTIVO"
+  | "FINALIZADO"
+  | "SUSPENDIDO"
+  | "CANCELADO";
+
+export interface Diagnostico {
+  id: string;
+  idConsulta: string;
+  descripcionCondicion: string;
+  nivelGravedad?: string | null;
+  tipoAfeccion?: string | null;
+  estado: EstadoDiagnostico;
+
+  fechaAtencionReal: string;
+  idCita: string;
+  motivoConsulta?: string | null;
+
+  mascotaId: string;
+  mascotaNombre: string;
+  mascotaEspecie: string;
+
+  clienteId: string;
+  clienteNombre: string;
+
+  veterinarioId: string;
+  veterinarioNombre: string;
+
+  servicioNombre: string;
+  tratamientosCount: number;
+}
+
+export interface DiagnosticoInput {
+  id?: string;
+  idConsulta: string;
+  descripcionCondicion: string;
+  nivelGravedad?: string | null;
+  tipoAfeccion?: string | null;
+  estado: EstadoDiagnostico;
+}
+
+export interface CatalogoDiagnosticoConsulta {
+  id: string;
+  idCita: string;
+  fechaAtencionReal: string;
+  observaciones?: string | null;
+  recomendaciones?: string | null;
+  mascotaNombre: string;
+  mascotaEspecie: string;
+  clienteNombre: string;
+  veterinarioNombre: string;
+  servicioNombre: string;
+}
+
+export interface CatalogosDiagnosticos {
+  consultas: CatalogoDiagnosticoConsulta[];
+}
+
+export interface CatalogoTratamientoDiagnostico {
+  id: string;
+  idConsulta: string;
+  descripcionCondicion: string;
+  nivelGravedad?: string | null;
+  tipoAfeccion?: string | null;
+  estado: EstadoDiagnostico;
+  fechaAtencionReal: string;
+  mascotaNombre: string;
+  mascotaEspecie: string;
+  clienteNombre: string;
+  veterinarioConsultaNombre: string;
+}
+
+export interface CatalogoTratamientoVeterinario {
+  id: string;
+  nombre: string;
+  telefono?: string | null;
+  especialidad?: string | null;
+  nroMatricula?: string | null;
+}
+
+export interface CatalogoTratamientoServicio {
+  id: string;
+  nombre: string;
+  tipoServicio: string;
+  precio: number;
+  descripcion?: string | null;
+  activo: "S" | "N";
+}
+
+export interface CatalogoTratamientoMedicamento {
+  id: string;
+  nombre: string;
+  descripcion?: string | null;
+  precioUnitario: number;
+}
+
+export interface CatalogosTratamientos {
+  diagnosticos: CatalogoTratamientoDiagnostico[];
+  veterinarios: CatalogoTratamientoVeterinario[];
+  servicios: CatalogoTratamientoServicio[];
+  medicamentos: CatalogoTratamientoMedicamento[];
+}
+
+export interface Tratamiento {
+  id: string;
+  idDiagnostico: string;
+  idVeterinario: string;
+  idServicio?: string | null;
+  tipo: TipoTratamiento;
+  fechaInicio: string;
+  fechaFinEstimada?: string | null;
+  indicaciones?: string | null;
+  estado?: EstadoTratamiento | null;
+
+  descripcionCondicion: string;
+  nivelGravedad?: string | null;
+  tipoAfeccion?: string | null;
+  diagnosticoEstado: EstadoDiagnostico;
+
+  idConsulta: string;
+  fechaAtencionReal: string;
+
+  mascotaNombre: string;
+  mascotaEspecie: string;
+  clienteNombre: string;
+
+  veterinarioNombre: string;
+
+  servicioNombre?: string | null;
+  servicioTipo?: string | null;
+  servicioPrecio?: number | null;
+
+  medicamentosCount: number;
+  medicamentos?: string | null;
+}
+
+export interface TratamientoInput {
+  id?: string;
+  idDiagnostico: string;
+  idVeterinario: string;
+  idServicio?: string | null;
+  tipo: TipoTratamiento;
+  fechaInicio: string;
+  fechaFinEstimada?: string | null;
+  indicaciones?: string | null;
+  estado?: EstadoTratamiento | null;
+}
+
+export interface TratamientoMedicamento {
+  idTratamiento: string;
+  idMedicamento: string;
+  dosis: string;
+  frecuencia: string;
+  viaAdministracion?: string | null;
+  duracion?: string | null;
+  medicamentoNombre: string;
+  medicamentoDescripcion?: string | null;
+  precioUnitario: number;
+}
+
+export interface TratamientoMedicamentoInput {
+  idMedicamento: string;
+  dosis: string;
+  frecuencia: string;
+  viaAdministracion?: string | null;
+  duracion?: string | null;
+}
+
+export function getDiagnosticos() {
+  return request<Diagnostico[]>("/diagnosticos");
+}
+
+export function getCatalogosDiagnosticos() {
+  return request<CatalogosDiagnosticos>("/diagnosticos/catalogos");
+}
+
+export function createDiagnostico(diagnostico: DiagnosticoInput) {
+  return request<{ message: string; id: string }>("/diagnosticos", {
+    method: "POST",
+    body: JSON.stringify(diagnostico),
+  });
+}
+
+export function updateDiagnostico(id: string, diagnostico: DiagnosticoInput) {
+  return request<{ message: string }>(`/diagnosticos/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(diagnostico),
+  });
+}
+
+export function deleteDiagnostico(id: string) {
+  return request<{ message: string }>(`/diagnosticos/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export function getTratamientos() {
+  return request<Tratamiento[]>("/tratamientos");
+}
+
+export function getCatalogosTratamientos() {
+  return request<CatalogosTratamientos>("/tratamientos/catalogos");
+}
+
+export function createTratamiento(tratamiento: TratamientoInput) {
+  return request<{ message: string; id: string }>("/tratamientos", {
+    method: "POST",
+    body: JSON.stringify(tratamiento),
+  });
+}
+
+export function updateTratamiento(id: string, tratamiento: TratamientoInput) {
+  return request<{ message: string }>(`/tratamientos/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(tratamiento),
+  });
+}
+
+export function deleteTratamiento(id: string) {
+  return request<{ message: string }>(`/tratamientos/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export function getTratamientoMedicamentos(idTratamiento: string) {
+  return request<TratamientoMedicamento[]>(
+    `/tratamientos/${encodeURIComponent(idTratamiento)}/medicamentos`
+  );
+}
+
+export function addTratamientoMedicamento(
+  idTratamiento: string,
+  medicamento: TratamientoMedicamentoInput
+) {
+  return request<{ message: string }>(
+    `/tratamientos/${encodeURIComponent(idTratamiento)}/medicamentos`,
+    {
+      method: "POST",
+      body: JSON.stringify(medicamento),
+    }
+  );
+}
+
+export function updateTratamientoMedicamento(
+  idTratamiento: string,
+  idMedicamento: string,
+  medicamento: Omit<TratamientoMedicamentoInput, "idMedicamento">
+) {
+  return request<{ message: string }>(
+    `/tratamientos/${encodeURIComponent(idTratamiento)}/medicamentos/${encodeURIComponent(
+      idMedicamento
+    )}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(medicamento),
+    }
+  );
+}
+
+export function deleteTratamientoMedicamento(
+  idTratamiento: string,
+  idMedicamento: string
+) {
+  return request<{ message: string }>(
+    `/tratamientos/${encodeURIComponent(idTratamiento)}/medicamentos/${encodeURIComponent(
+      idMedicamento
+    )}`,
+    {
+      method: "DELETE",
+    }
+  );
+}
