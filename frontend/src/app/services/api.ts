@@ -205,3 +205,89 @@ export function deleteCita(id: string) {
     method: "DELETE",
   });
 }
+
+
+
+export type TipoEmpleado = "VETERINARIO" | "RECEPCIONISTA";
+export type EstadoLaboralEmpleado = "ACTIVO" | "INACTIVO" | "SUSPENDIDO";
+export type TurnoRecepcionista = "DIURNO" | "NOCTURNO";
+
+export interface Empleado {
+  id: string;
+  nombre: string;
+  telefono?: string | null;
+  fechaIngreso: string;
+  estadoLaboral: EstadoLaboralEmpleado;
+  tipoEmpleado: TipoEmpleado;
+  salario: number;
+  especialidad?: string | null;
+  nroMatricula?: string | null;
+  turno?: TurnoRecepcionista | null;
+}
+
+export interface EmpleadoInput {
+  id?: string;
+  nombre: string;
+  telefono?: string | null;
+  fechaIngreso: string;
+  estadoLaboral: EstadoLaboralEmpleado;
+  tipoEmpleado: TipoEmpleado;
+  salario: number | string;
+  especialidad?: string | null;
+  nroMatricula?: string | null;
+  turno?: TurnoRecepcionista | "" | null;
+}
+
+export interface VeterinarioCatalogo {
+  id: string;
+  nombre: string;
+  telefono?: string | null;
+  fechaIngreso?: string | null;
+  estadoLaboral?: EstadoLaboralEmpleado;
+  salario?: number | null;
+  especialidad?: string | null;
+  nroMatricula?: string | null;
+}
+
+export interface RecepcionistaCatalogo {
+  id: string;
+  nombre: string;
+  telefono?: string | null;
+  fechaIngreso?: string | null;
+  estadoLaboral?: EstadoLaboralEmpleado;
+  salario?: number | null;
+  turno?: TurnoRecepcionista | null;
+}
+
+// Empleados
+export function getEmpleados() {
+  return request<Empleado[]>("/empleados");
+}
+
+export function getVeterinarios() {
+  return request<VeterinarioCatalogo[]>("/empleados/veterinarios");
+}
+
+export function getRecepcionistas() {
+  return request<RecepcionistaCatalogo[]>("/empleados/recepcionistas");
+}
+
+export function createEmpleado(empleado: EmpleadoInput) {
+  return request<{ message: string }>("/empleados", {
+    method: "POST",
+    body: JSON.stringify(empleado),
+  });
+}
+
+export function updateEmpleado(id: string, empleado: EmpleadoInput) {
+  return request<{ message: string }>(`/empleados/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(empleado),
+  });
+}
+
+export function deleteEmpleado(id: string) {
+  return request<{ message: string }>(`/empleados/${id}`, {
+    method: "DELETE",
+  });
+}
