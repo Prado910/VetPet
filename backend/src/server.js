@@ -7,6 +7,9 @@ const clientesRoutes = require("./routes/clientes.routes");
 const mascotasRoutes = require("./routes/mascotas.routes");
 const citasRoutes = require("./routes/citas.routes");
 const empleadosRoutes = require("./routes/empleados.routes");
+const serviciosRoutes = require("./routes/servicios.routes");
+const medicamentosRoutes = require("./routes/medicamentos.routes");
+const vacunasRoutes = require("./routes/vacunas.routes");
 
 const app = express();
 
@@ -23,6 +26,9 @@ app.use("/api/clientes", clientesRoutes);
 app.use("/api/mascotas", mascotasRoutes);
 app.use("/api/citas", citasRoutes);
 app.use("/api/empleados", empleadosRoutes);
+app.use("/api/servicios", serviciosRoutes);
+app.use("/api/medicamentos", medicamentosRoutes);
+app.use("/api/vacunas", vacunasRoutes);
 
 const PORT = process.env.PORT || 3000;
 
