@@ -502,3 +502,106 @@ export function deleteAplicacionVacuna(aplicacion: AplicacionVacunaInput) {
     method: "DELETE",
   });
 }
+
+export interface Consulta {
+  id: string;
+  idCita: string;
+  idServicio: string;
+  temperatura?: number | null;
+  pesoConsulta?: number | null;
+  observaciones?: string | null;
+  recomendaciones?: string | null;
+  fechaAtencionReal: string;
+
+  citaFecha: string;
+  citaHora: string;
+  citaEstado: string;
+  motivo?: string | null;
+
+  mascotaId: string;
+  mascotaNombre: string;
+  mascotaEspecie: string;
+
+  clienteId: string;
+  clienteNombre: string;
+  clienteTelefono?: string | null;
+
+  veterinarioId: string;
+  veterinarioNombre: string;
+
+  servicioNombre: string;
+  servicioTipo: string;
+  servicioPrecio: number;
+}
+
+export interface ConsultaInput {
+  id?: string;
+  idCita: string;
+  idServicio: string;
+  temperatura?: number | string | null;
+  pesoConsulta?: number | string | null;
+  observaciones?: string | null;
+  recomendaciones?: string | null;
+  fechaAtencionReal: string;
+}
+
+export interface CatalogoConsultaCita {
+  id: string;
+  fecha: string;
+  hora: string;
+  motivo?: string | null;
+  estado: string;
+
+  mascotaId: string;
+  mascotaNombre: string;
+  mascotaEspecie: string;
+
+  clienteId: string;
+  clienteNombre: string;
+  clienteTelefono?: string | null;
+
+  veterinarioId: string;
+  veterinarioNombre: string;
+}
+
+export interface CatalogoConsultaServicio {
+  id: string;
+  nombre: string;
+  tipoServicio: string;
+  precio: number;
+  descripcion?: string | null;
+  activo: "S" | "N";
+}
+
+export interface CatalogosConsultas {
+  citasDisponibles: CatalogoConsultaCita[];
+  servicios: CatalogoConsultaServicio[];
+}
+
+export function getConsultas() {
+  return request<Consulta[]>("/consultas");
+}
+
+export function getCatalogosConsultas() {
+  return request<CatalogosConsultas>("/consultas/catalogos");
+}
+
+export function createConsulta(consulta: ConsultaInput) {
+  return request<{ message: string; id: string }>("/consultas", {
+    method: "POST",
+    body: JSON.stringify(consulta),
+  });
+}
+
+export function updateConsulta(id: string, consulta: ConsultaInput) {
+  return request<{ message: string }>(`/consultas/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(consulta),
+  });
+}
+
+export function deleteConsulta(id: string) {
+  return request<{ message: string }>(`/consultas/${id}`, {
+    method: "DELETE",
+  });
+}
