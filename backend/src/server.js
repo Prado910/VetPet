@@ -14,6 +14,7 @@ const consultasRoutes = require("./routes/consultas.routes");
 const diagnosticosRoutes = require("./routes/diagnosticos.routes");
 const tratamientosRoutes = require("./routes/tratamientos.routes");
 const facturasRoutes = require("./routes/facturas.routes");
+const dashboardRoutes = require("./routes/dashboard.routes");
 
 const app = express();
 
@@ -37,6 +38,7 @@ app.use("/api/consultas", consultasRoutes);
 app.use("/api/diagnosticos", diagnosticosRoutes);
 app.use("/api/tratamientos", tratamientosRoutes);
 app.use("/api/facturas", facturasRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 
 const PORT = process.env.PORT || 3000;
 

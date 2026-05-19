@@ -1057,3 +1057,69 @@ export function recalcularFactura(idFactura: string) {
     }
   );
 }
+
+export interface DashboardResumen {
+  totalClientes: number;
+  clientesActivos: number;
+  totalMascotas: number;
+  empleadosActivos: number;
+  citasHoy: number;
+  citasPendientes: number;
+  consultasMes: number;
+  tratamientosActivos: number;
+  facturasPendientes: number;
+  ingresosHoy: number;
+  ingresosMes: number;
+  ingresosTotal: number;
+  vacunasMes: number;
+}
+
+export interface DashboardCitaHoy {
+  id: string;
+  fecha: string;
+  hora: string;
+  motivo?: string | null;
+  estado: string;
+
+  mascotaId: string;
+  mascotaNombre: string;
+  mascotaEspecie: string;
+
+  clienteId: string;
+  clienteNombre: string;
+  clienteTelefono?: string | null;
+
+  veterinarioId: string;
+  veterinarioNombre: string;
+}
+
+export type DashboardActividadTipo =
+  | "CITA"
+  | "CONSULTA"
+  | "FACTURA"
+  | "VACUNA"
+  | "TRATAMIENTO";
+
+export interface DashboardActividad {
+  tipo: DashboardActividadTipo;
+  id: string;
+  titulo: string;
+  descripcion: string;
+  fecha: string;
+  hora?: string | null;
+  estado?: string | null;
+}
+
+export function getDashboardResumen() {
+  return request<DashboardResumen>("/dashboard/resumen");
+}
+
+export function getDashboardCitasHoy() {
+  return request<DashboardCitaHoy[]>("/dashboard/citas-hoy");
+}
+
+export function getDashboardActividadReciente(limite = 10) {
+  return request<DashboardActividad[]>(
+    `/dashboard/actividad-reciente?limite=${limite}`
+  );
+}
