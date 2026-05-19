@@ -887,3 +887,173 @@ export function deleteTratamientoMedicamento(
     }
   );
 }
+
+export type EstadoPago = "PENDIENTE" | "PAGADA" | "ANULADA";
+
+export type TipoConceptoFactura =
+  | "CONSULTA"
+  | "MEDICAMENTO"
+  | "VACUNA"
+  | "PROCEDIMIENTO"
+  | "OTRO";
+
+export interface Factura {
+  id: string;
+  idConsulta: string;
+  idCliente: string;
+  fecha: string;
+  valorTotal: number;
+  metodoPago?: string | null;
+  estadoPago: EstadoPago;
+
+  clienteNombre: string;
+  clienteTelefono?: string | null;
+  clienteEmail?: string | null;
+
+  idCita: string;
+  fechaAtencionReal: string;
+
+  mascotaId: string;
+  mascotaNombre: string;
+  mascotaEspecie: string;
+
+  servicioNombre: string;
+  servicioTipo: string;
+  servicioPrecio: number;
+
+  detallesCount: number;
+  totalCalculado: number;
+}
+
+export interface FacturaInput {
+  id?: string;
+  idConsulta: string;
+  fecha: string;
+  metodoPago?: string | null;
+  estadoPago: EstadoPago;
+  crearDetalleConsulta?: boolean;
+}
+
+export interface FacturaDetalle {
+  id: string;
+  idFactura: string;
+  descripcion: string;
+  tipoConcepto: TipoConceptoFactura;
+  cantidad: number;
+  precioUnitario: number;
+  subtotal: number;
+}
+
+export interface FacturaDetalleInput {
+  id?: string;
+  descripcion: string;
+  tipoConcepto: TipoConceptoFactura;
+  cantidad: number | string;
+  precioUnitario: number | string;
+}
+
+export interface CatalogoFacturaConsulta {
+  id: string;
+  idCita: string;
+  fechaAtencionReal: string;
+  clienteId: string;
+  clienteNombre: string;
+  clienteTelefono?: string | null;
+  mascotaId: string;
+  mascotaNombre: string;
+  mascotaEspecie: string;
+  servicioId: string;
+  servicioNombre: string;
+  servicioTipo: string;
+  servicioPrecio: number;
+}
+
+export interface CatalogosFacturas {
+  consultasDisponibles: CatalogoFacturaConsulta[];
+}
+
+export function getFacturas() {
+  return request<Factura[]>("/facturas");
+}
+
+export function getCatalogosFacturas() {
+  return request<CatalogosFacturas>("/facturas/catalogos");
+}
+
+export function createFactura(factura: FacturaInput) {
+  return request<{ message: string; id: string; valorTotal: number }>(
+    "/facturas",
+    {
+      method: "POST",
+      body: JSON.stringify(factura),
+    }
+  );
+}
+
+export function updateFactura(id: string, factura: FacturaInput) {
+  return request<{ message: string; valorTotal: number }>(`/facturas/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(factura),
+  });
+}
+
+export function deleteFactura(id: string) {
+  return request<{ message: string }>(`/facturas/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export function getFacturaDetalles(idFactura: string) {
+  return request<FacturaDetalle[]>(
+    `/facturas/${encodeURIComponent(idFactura)}/detalles`
+  );
+}
+
+export function createFacturaDetalle(
+  idFactura: string,
+  detalle: FacturaDetalleInput
+) {
+  return request<{ message: string; id: string; valorTotal: number }>(
+    `/facturas/${encodeURIComponent(idFactura)}/detalles`,
+    {
+      method: "POST",
+      body: JSON.stringify(detalle),
+    }
+  );
+}
+
+export function updateFacturaDetalle(
+  idFactura: string,
+  idDetalle: string,
+  detalle: FacturaDetalleInput
+) {
+  return request<{ message: string; valorTotal: number }>(
+    `/facturas/${encodeURIComponent(idFactura)}/detalles/${encodeURIComponent(
+      idDetalle
+    )}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(detalle),
+    }
+  );
+}
+
+export function deleteFacturaDetalle(idFactura: string, idDetalle: string) {
+  return request<{ message: string; valorTotal: number }>(
+    `/facturas/${encodeURIComponent(idFactura)}/detalles/${encodeURIComponent(
+      idDetalle
+    )}`,
+    {
+      method: "DELETE",
+    }
+  );
+}
+
+export function recalcularFactura(idFactura: string) {
+  return request<{ message: string; valorTotal: number }>(
+    `/facturas/${encodeURIComponent(idFactura)}/recalcular`,
+    {
+      method: "POST",
+    }
+  );
+}

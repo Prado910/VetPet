@@ -13,6 +13,7 @@ const vacunasRoutes = require("./routes/vacunas.routes");
 const consultasRoutes = require("./routes/consultas.routes");
 const diagnosticosRoutes = require("./routes/diagnosticos.routes");
 const tratamientosRoutes = require("./routes/tratamientos.routes");
+const facturasRoutes = require("./routes/facturas.routes");
 
 const app = express();
 
@@ -35,6 +36,7 @@ app.use("/api/vacunas", vacunasRoutes);
 app.use("/api/consultas", consultasRoutes);
 app.use("/api/diagnosticos", diagnosticosRoutes);
 app.use("/api/tratamientos", tratamientosRoutes);
+app.use("/api/facturas", facturasRoutes);
 
 const PORT = process.env.PORT || 3000;
 
