@@ -492,81 +492,112 @@ export function Clientes() {
       </Card>
 
       {selectedClienteId && clienteSeleccionado && (
-        <div className="fixed inset-y-0 right-0 w-96 bg-white shadow-xl border-l border-gray-200 overflow-y-auto z-50">
-          <div className="p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-gray-900">
+        <div className="fixed inset-y-0 right-0 w-[420px] bg-white shadow-2xl border-l border-gray-200 overflow-y-auto z-50">
+          <div className="p-7">
+            <div className="flex items-center justify-between mb-10">
+              <h2 className="text-2xl font-bold text-gray-900">
                 Detalles del cliente
               </h2>
 
               <button
                 type="button"
                 onClick={() => setSelectedClienteId(null)}
-                className="p-2 hover:bg-gray-100 rounded-lg"
+                className="p-2 hover:bg-gray-100 rounded-lg text-gray-900"
               >
-                <X className="w-5 h-5" />
+                <X className="w-6 h-6" />
               </button>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <h3 className="font-semibold text-gray-900">
-                  {clienteSeleccionado.nombre}
-                </h3>
-                <p className="text-sm text-gray-500">
-                  {clienteSeleccionado.id}
-                </p>
-              </div>
+            <div className="flex items-start justify-between mb-6">
+              <h3 className="text-xl font-semibold text-gray-900">
+                {clienteSeleccionado.nombre}
+              </h3>
 
               <Badge variant={getBadgeVariant(clienteSeleccionado.estado)}>
                 {clienteSeleccionado.estado}
               </Badge>
+            </div>
 
-              <div className="flex items-start gap-3">
-                <Mail className="w-5 h-5 text-gray-400 mt-0.5" />
+            <div className="space-y-5 mb-8">
+              <div className="flex items-start gap-4">
+                <Mail className="w-6 h-6 text-gray-400 mt-1" />
                 <div>
-                  <p className="text-sm text-gray-500">Email</p>
-                  <p className="text-sm text-gray-900">
+                  <p className="text-gray-500">Email</p>
+                  <p className="text-gray-900">
                     {clienteSeleccionado.email || "Sin email"}
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-start gap-3">
-                <Phone className="w-5 h-5 text-gray-400 mt-0.5" />
+              <div className="flex items-start gap-4">
+                <Phone className="w-6 h-6 text-gray-400 mt-1" />
                 <div>
-                  <p className="text-sm text-gray-500">Teléfono</p>
-                  <p className="text-sm text-gray-900">
+                  <p className="text-gray-500">Teléfono</p>
+                  <p className="text-gray-900">
                     {clienteSeleccionado.telefono || "Sin teléfono"}
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-start gap-3">
-                <MapPin className="w-5 h-5 text-gray-400 mt-0.5" />
+              <div className="flex items-start gap-4">
+                <MapPin className="w-6 h-6 text-gray-400 mt-1" />
                 <div>
-                  <p className="text-sm text-gray-500">Dirección</p>
-                  <p className="text-sm text-gray-900">
+                  <p className="text-gray-500">Dirección</p>
+                  <p className="text-gray-900">
                     {clienteSeleccionado.direccion || "Sin dirección"}
                   </p>
                 </div>
               </div>
+            </div>
 
-              <div className="pt-4 border-t flex gap-2">
-                <Button
-                  variant="secondary"
-                  onClick={() => abrirEdicion(clienteSeleccionado)}
-                >
-                  Editar
-                </Button>
+            <div className="mb-8">
+              <h3 className="text-2xl font-bold text-gray-900 mb-4">
+                Mascotas ({mascotasCliente.length})
+              </h3>
 
-                <Button
-                  variant="danger"
-                  onClick={() => eliminarCliente(clienteSeleccionado)}
-                >
-                  Eliminar
-                </Button>
+              <div className="space-y-4">
+                {mascotasCliente.length === 0 ? (
+                  <div className="rounded-2xl bg-gray-50 p-4 text-gray-500">
+                    Este cliente no tiene mascotas registradas.
+                  </div>
+                ) : (
+                  mascotasCliente.map((mascota) => (
+                    <div
+                      key={mascota.id}
+                      className="rounded-2xl bg-gray-50 p-4 flex items-center justify-between"
+                    >
+                      <div>
+                        <p className="text-lg font-semibold text-gray-900">
+                          {mascota.nombre}
+                        </p>
+                        <p className="text-gray-500">
+                          {mascota.raza || "Sin raza"} • {mascota.especie}
+                        </p>
+                      </div>
+
+                      <span className="px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-700 border border-blue-200">
+                        {mascota.estadoSalud || "Sin estado"}
+                      </span>
+                    </div>
+                  ))
+                )}
               </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Button
+                variant="secondary"
+                onClick={() => abrirEdicion(clienteSeleccionado)}
+              >
+                Editar cliente
+              </Button>
+
+              <Button
+                variant="danger"
+                onClick={() => eliminarCliente(clienteSeleccionado)}
+              >
+                Eliminar
+              </Button>
             </div>
           </div>
         </div>
