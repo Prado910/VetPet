@@ -1123,3 +1123,139 @@ export function getDashboardActividadReciente(limite = 10) {
     `/dashboard/actividad-reciente?limite=${limite}`
   );
 }
+
+export interface ReporteIngresoMensual {
+  mesNumero: number;
+  mes: string;
+  totalFacturas: number;
+  facturasPagadas: number;
+  facturasPendientes: number;
+  facturasAnuladas: number;
+  ingresosPagados: number;
+  ingresosPendientes: number;
+  valorTotal: number;
+}
+
+export interface ReporteMascotaMasAtendida {
+  mascotaId: string;
+  mascotaNombre: string;
+  mascotaEspecie: string;
+  mascotaRaza?: string | null;
+  clienteId: string;
+  clienteNombre: string;
+  atenciones: number;
+  ultimaAtencion?: string | null;
+  ingresosGenerados: number;
+}
+
+export interface ReporteVacunaAplicada {
+  vacunaId: string;
+  vacunaNombre: string;
+  laboratorio?: string | null;
+  especieObjetivo?: string | null;
+  aplicaciones: number;
+  mascotasVacunadas: number;
+  valorEstimado: number;
+  primeraAplicacion?: string | null;
+  ultimaAplicacion?: string | null;
+}
+
+export interface ReporteTratamientoActivo {
+  id: string;
+  idDiagnostico: string;
+  tipo: string;
+  fechaInicio: string;
+  fechaFinEstimada?: string | null;
+  indicaciones?: string | null;
+  estado: string;
+
+  descripcionCondicion: string;
+  nivelGravedad?: string | null;
+  tipoAfeccion?: string | null;
+
+  mascotaId: string;
+  mascotaNombre: string;
+  mascotaEspecie: string;
+
+  clienteId: string;
+  clienteNombre: string;
+  clienteTelefono?: string | null;
+
+  veterinarioId: string;
+  veterinarioNombre: string;
+
+  servicioNombre?: string | null;
+  medicamentosCount: number;
+}
+
+export interface ReporteTopServicio {
+  servicioId: string;
+  servicioNombre: string;
+  tipoServicio: string;
+  precio: number;
+  vecesUsado: number;
+  ingresosPagados: number;
+  ultimaAtencion?: string | null;
+}
+
+export interface ReporteResumenCliente {
+  clienteId: string;
+  clienteNombre: string;
+  telefono?: string | null;
+  email?: string | null;
+  estado: string;
+  totalMascotas: number;
+  totalFacturas: number;
+  facturasPagadas: number;
+  facturasPendientes: number;
+  facturasAnuladas: number;
+  ingresoTotal: number;
+  ingresoPendiente: number;
+  ultimaFactura?: string | null;
+}
+
+export function getReporteIngresosMensuales(anio: number, mes?: number) {
+  const params = new URLSearchParams();
+  params.set("anio", String(anio));
+
+  if (mes && mes >= 1 && mes <= 12) {
+    params.set("mes", String(mes));
+  }
+
+  return request<ReporteIngresoMensual[]>(
+    `/reportes/ingresos-mensuales?${params.toString()}`
+  );
+}
+
+export function getReporteMascotasMasAtendidas(top = 5) {
+  return request<ReporteMascotaMasAtendida[]>(
+    `/reportes/mascotas-mas-atendidas?top=${top}`
+  );
+}
+
+export function getReporteVacunasAplicadas(anio: number, mes?: number) {
+  const params = new URLSearchParams();
+  params.set("anio", String(anio));
+
+  if (mes && mes >= 1 && mes <= 12) {
+    params.set("mes", String(mes));
+  }
+
+  return request<ReporteVacunaAplicada[]>(
+    `/reportes/vacunas-aplicadas?${params.toString()}`
+  );
+}
+
+export function getReporteTratamientosActivos() {
+  return request<ReporteTratamientoActivo[]>(
+    "/reportes/tratamientos-activos"
+  );
+}
+
+export function getReporteTopServicios(top = 5) {
+  return request<ReporteTopServicio[]>(`/reportes/top-servicios?top=${top}`);
+}
+
+export function getReporteResumenClientes() {
+  return request<ReporteResumenCliente[]>("/reportes/resumen-clientes");
+}
