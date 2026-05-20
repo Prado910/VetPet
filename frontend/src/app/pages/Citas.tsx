@@ -1,46 +1,31 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  Calendar as CalendarIcon,
+  CheckCircle,
+  Clock,
+  Plus,
+  X,
+  XCircle,
+} from "lucide-react";
+import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "../components/ui/card";
-import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../components/ui/table";
-import {
-  Plus,
-  Calendar as CalendarIcon,
-  CheckCircle,
-  XCircle,
-  Clock,
-  Edit2,
-  Trash2,
-  X,
-  RefreshCw,
-  Search,
-} from "lucide-react";
-import {
+import type {
   CatalogosCitas,
   Cita,
   CitaInput,
   EstadoCita,
+} from "../services/api";
+import {
   createCita,
-  deleteCita,
   getCatalogosCitas,
   getCitas,
   updateCita,
 } from "../services/api";
-
-type BadgeVariant = "success" | "warning" | "danger" | "default" | "info";
 
 const estadosCita: EstadoCita[] = [
   "PROGRAMADA",
@@ -54,6 +39,83 @@ function obtenerFechaLocal() {
   const fecha = new Date();
   const local = new Date(fecha.getTime() - fecha.getTimezoneOffset() * 60000);
   return local.toISOString().slice(0, 10);
+}
+
+function generarIdCitaTemporal() {
+  return `CIT${Date.now().toString().slice(-6)}`;
+}
+
+function formatearFechaTitulo(fechaTexto: string) {
+  const fecha = new Date(`${fechaTexto}T00:00:00`);
+  const partes = new Intl.DateTimeFormat("es-ES", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).formatToParts(fecha);
+
+  const dia = partes.find((parte) => parte.type === "day")?.value || "";
+  const mes = partes.find((parte) => parte.type === "month")?.value || "";
+  const anio = partes.find((parte) => parte.type === "year")?.value || "";
+
+  const mesCapitalizado = mes.charAt(0).toUpperCase() + mes.slice(1);
+
+  return `${dia} de ${mesCapitalizado} ${anio}`;
+}
+
+function compararFechaHora(a: Cita, b: Cita) {
+  return `${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`);
+}
+
+function getEstadoClassName(estado: string) {
+  switch (estado) {
+    case "CONFIRMADA":
+      return "bg-emerald-100 text-emerald-700 border-emerald-300";
+    case "PROGRAMADA":
+      return "bg-blue-100 text-blue-700 border-blue-300";
+    case "ATENDIDA":
+      return "bg-gray-100 text-gray-700 border-gray-300";
+    case "CANCELADA":
+      return "bg-red-100 text-red-700 border-red-300";
+    case "REPROGRAMADA":
+      return "bg-amber-100 text-amber-700 border-amber-300";
+    default:
+      return "bg-gray-100 text-gray-700 border-gray-300";
+  }
+}
+
+function EstadoBadge({
+  estado,
+  size = "md",
+}: {
+  estado: string;
+  size?: "sm" | "md";
+}) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border font-medium ${getEstadoClassName(
+        estado,
+      )} ${size === "sm" ? "px-2 py-0.5 text-xs" : "px-3 py-1 text-sm"}`}
+    >
+      {estado}
+    </span>
+  );
+}
+
+function formatearVacio(valor?: string | null) {
+  return valor?.trim() ? valor : "Sin registrar";
+}
+
+function citaToInput(cita: Cita, estado?: EstadoCita): CitaInput {
+  return {
+    id: cita.id,
+    mascotaId: cita.mascotaId,
+    veterinarioId: cita.veterinarioId,
+    recepcionistaId: cita.recepcionistaId,
+    fecha: cita.fecha,
+    hora: cita.hora,
+    motivo: cita.motivo || "",
+    estado: estado || cita.estado,
+  };
 }
 
 const estadoInicial: CitaInput = {
@@ -75,19 +137,12 @@ export function Citas() {
     recepcionistas: [],
   });
 
-  const [selectedCitaId, setSelectedCitaId] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [modalAbierto, setModalAbierto] = useState(false);
+  const [editando, setEditando] = useState<Cita | null>(null);
   const [form, setForm] = useState<CitaInput>(estadoInicial);
-  const [showForm, setShowForm] = useState(false);
-
-  const [searchTerm, setSearchTerm] = useState("");
-  const [filterEstado, setFilterEstado] = useState<"TODOS" | EstadoCita>(
-    "TODOS",
-  );
-  const [fechaFiltro, setFechaFiltro] = useState("");
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
 
   const hoy = obtenerFechaLocal();
@@ -105,9 +160,7 @@ export function Citas() {
       setCitas(citasData);
       setCatalogos(catalogosData);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "No se pudieron cargar las citas.",
-      );
+      setError(err instanceof Error ? err.message : "Error cargando citas");
     } finally {
       setLoading(false);
     }
@@ -117,168 +170,154 @@ export function Citas() {
     cargarDatos();
   }, []);
 
-  const citasFiltradas = useMemo(() => {
-    const search = searchTerm.toLowerCase().trim();
+  const citasOrdenadas = useMemo(
+    () => citas.slice().sort(compararFechaHora),
+    [citas],
+  );
 
-    return citas.filter((cita) => {
-      const matchesSearch =
-        cita.id.toLowerCase().includes(search) ||
-        cita.mascotaNombre.toLowerCase().includes(search) ||
-        cita.clienteNombre.toLowerCase().includes(search) ||
-        cita.veterinarioNombre.toLowerCase().includes(search) ||
-        (cita.motivo || "").toLowerCase().includes(search);
+  const citasHoy = useMemo(
+    () => citasOrdenadas.filter((cita) => cita.fecha === hoy),
+    [citasOrdenadas, hoy],
+  );
 
-      const matchesEstado =
-        filterEstado === "TODOS" || cita.estado === filterEstado;
+  const citasFuturas = useMemo(
+    () =>
+      citasOrdenadas.filter(
+        (cita) =>
+          cita.fecha > hoy &&
+          cita.estado !== "CANCELADA" &&
+          cita.estado !== "ATENDIDA",
+      ),
+    [citasOrdenadas, hoy],
+  );
 
-      const matchesFecha = !fechaFiltro || cita.fecha === fechaFiltro;
+  const conteos = useMemo(
+    () => ({
+      programadas: citas.filter((cita) => cita.estado === "PROGRAMADA").length,
+      confirmadas: citas.filter((cita) => cita.estado === "CONFIRMADA").length,
+      atendidas: citas.filter((cita) => cita.estado === "ATENDIDA").length,
+      canceladas: citas.filter((cita) => cita.estado === "CANCELADA").length,
+    }),
+    [citas],
+  );
 
-      return matchesSearch && matchesEstado && matchesFecha;
-    });
-  }, [citas, searchTerm, filterEstado, fechaFiltro]);
-
-  const selectedCita = selectedCitaId
-    ? citas.find((cita) => cita.id === selectedCitaId)
-    : null;
-
-  const getBadgeVariant = (estado: EstadoCita): BadgeVariant => {
-    switch (estado) {
-      case "CONFIRMADA":
-        return "success";
-      case "PROGRAMADA":
-        return "info";
-      case "ATENDIDA":
-        return "default";
-      case "CANCELADA":
-        return "danger";
-      case "REPROGRAMADA":
-        return "warning";
-      default:
-        return "default";
-    }
-  };
-
-  const limpiarFormulario = () => {
+  const abrirCrear = () => {
+    setEditando(null);
     setForm({
       ...estadoInicial,
-      fecha: obtenerFechaLocal(),
+      id: generarIdCitaTemporal(),
+      fecha: hoy,
     });
-    setEditingId(null);
-    setShowForm(false);
+    setModalAbierto(true);
   };
 
-  const iniciarCreacion = () => {
+  const abrirReprogramar = (cita: Cita) => {
+    setEditando(cita);
     setForm({
-      ...estadoInicial,
-      fecha: obtenerFechaLocal(),
+      ...citaToInput(cita),
+      estado: "REPROGRAMADA",
     });
-    setEditingId(null);
-    setShowForm(true);
+    setModalAbierto(true);
   };
 
-  const iniciarEdicion = (cita: Cita) => {
-    setForm({
-      id: cita.id,
-      mascotaId: cita.mascotaId,
-      veterinarioId: cita.veterinarioId,
-      recepcionistaId: cita.recepcionistaId,
-      fecha: cita.fecha,
-      hora: cita.hora,
-      motivo: cita.motivo || "",
-      estado: cita.estado,
-    });
-
-    setEditingId(cita.id);
-    setSelectedCitaId(cita.id);
-    setShowForm(true);
+  const cerrarModal = () => {
+    setModalAbierto(false);
+    setEditando(null);
+    setForm(estadoInicial);
   };
 
-  const guardarCita = async (event: React.FormEvent) => {
-    event.preventDefault();
-
+  const actualizarEstado = async (cita: Cita, estado: EstadoCita) => {
     try {
-      setSaving(true);
+      setGuardando(true);
       setError("");
 
-      if (editingId) {
-        await updateCita(editingId, form);
-      } else {
-        await createCita(form);
-      }
-
+      await updateCita(cita.id, citaToInput(cita, estado));
       await cargarDatos();
-      limpiarFormulario();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "No se pudo guardar la cita.",
+        err instanceof Error ? err.message : "Error actualizando la cita",
       );
     } finally {
-      setSaving(false);
+      setGuardando(false);
     }
   };
 
-  const eliminarCita = async (cita: Cita) => {
-    const confirmar = window.confirm(
-      `¿Seguro que deseas eliminar la cita ${cita.id}?`,
-    );
+  const guardarCita = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
 
-    if (!confirmar) return;
+    if (!form.id?.trim() && !editando) {
+      setError("El ID de la cita es obligatorio.");
+      return;
+    }
+
+    if (!form.mascotaId?.trim()) {
+      setError("La mascota es obligatoria.");
+      return;
+    }
+
+    if (!form.veterinarioId?.trim()) {
+      setError("El veterinario es obligatorio.");
+      return;
+    }
+
+    if (!form.recepcionistaId?.trim()) {
+      setError("El recepcionista es obligatorio.");
+      return;
+    }
+
+    if (!form.fecha?.trim()) {
+      setError("La fecha es obligatoria.");
+      return;
+    }
+
+    if (!form.hora?.trim()) {
+      setError("La hora es obligatoria.");
+      return;
+    }
 
     try {
+      setGuardando(true);
       setError("");
-      await deleteCita(cita.id);
 
-      if (selectedCitaId === cita.id) {
-        setSelectedCitaId(null);
+      const payload: CitaInput = {
+        id: editando ? editando.id : form.id?.trim(),
+        mascotaId: form.mascotaId,
+        veterinarioId: form.veterinarioId,
+        recepcionistaId: form.recepcionistaId,
+        fecha: form.fecha,
+        hora: form.hora,
+        motivo: form.motivo?.trim() || null,
+        estado: form.estado,
+      };
+
+      if (editando) {
+        await updateCita(editando.id, payload);
+      } else {
+        await createCita(payload);
       }
 
       await cargarDatos();
+      cerrarModal();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "No se pudo eliminar la cita.",
-      );
+      setError(err instanceof Error ? err.message : "Error guardando cita");
+    } finally {
+      setGuardando(false);
     }
   };
-
-  const totalProgramadas = citas.filter(
-    (cita) => cita.estado === "PROGRAMADA",
-  ).length;
-
-  const totalConfirmadas = citas.filter(
-    (cita) => cita.estado === "CONFIRMADA",
-  ).length;
-
-  const totalAtendidas = citas.filter(
-    (cita) => cita.estado === "ATENDIDA",
-  ).length;
-
-  const totalCanceladas = citas.filter(
-    (cita) => cita.estado === "CANCELADA",
-  ).length;
-
-  const totalHoy = citas.filter((cita) => cita.fecha === hoy).length;
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      {/* Page Header */}
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Citas</h1>
-          <p className="text-gray-500 mt-1">
-            Gestiona las citas veterinarias conectadas a la API
-          </p>
+          <p className="text-gray-500 mt-1">Gestiona las citas veterinarias</p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={cargarDatos} disabled={loading}>
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Actualizar
-          </Button>
-
-          <Button onClick={iniciarCreacion}>
-            <Plus className="w-4 h-4 mr-2" />
-            Nueva cita
-          </Button>
-        </div>
+        <Button onClick={abrirCrear}>
+          <Plus className="w-4 h-4 mr-2" />
+          Nueva cita
+        </Button>
       </div>
 
       {error && (
@@ -287,31 +326,19 @@ export function Citas() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+      {/* Quick Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
                 <CalendarIcon className="w-5 h-5 text-blue-600" />
               </div>
-              <div>
-                <p className="text-sm text-gray-500">Hoy</p>
-                <p className="text-xl font-bold text-gray-900">{totalHoy}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
 
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-cyan-100 rounded-lg flex items-center justify-center">
-                <Clock className="w-5 h-5 text-cyan-600" />
-              </div>
               <div>
                 <p className="text-sm text-gray-500">Programadas</p>
                 <p className="text-xl font-bold text-gray-900">
-                  {totalProgramadas}
+                  {conteos.programadas}
                 </p>
               </div>
             </div>
@@ -324,10 +351,11 @@ export function Citas() {
               <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
                 <CheckCircle className="w-5 h-5 text-emerald-600" />
               </div>
+
               <div>
                 <p className="text-sm text-gray-500">Confirmadas</p>
                 <p className="text-xl font-bold text-gray-900">
-                  {totalConfirmadas}
+                  {conteos.confirmadas}
                 </p>
               </div>
             </div>
@@ -340,10 +368,11 @@ export function Citas() {
               <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
                 <CheckCircle className="w-5 h-5 text-gray-600" />
               </div>
+
               <div>
                 <p className="text-sm text-gray-500">Atendidas</p>
                 <p className="text-xl font-bold text-gray-900">
-                  {totalAtendidas}
+                  {conteos.atendidas}
                 </p>
               </div>
             </div>
@@ -356,10 +385,11 @@ export function Citas() {
               <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
                 <XCircle className="w-5 h-5 text-red-600" />
               </div>
+
               <div>
                 <p className="text-sm text-gray-500">Canceladas</p>
                 <p className="text-xl font-bold text-gray-900">
-                  {totalCanceladas}
+                  {conteos.canceladas}
                 </p>
               </div>
             </div>
@@ -367,438 +397,457 @@ export function Citas() {
         </Card>
       </div>
 
-      {showForm && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>{editingId ? "Editar cita" : "Nueva cita"}</CardTitle>
-            <button
-              type="button"
-              onClick={limpiarFormulario}
-              className="p-2 hover:bg-gray-100 rounded-lg"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </CardHeader>
-
-          <CardContent>
-            <form
-              onSubmit={guardarCita}
-              className="grid grid-cols-1 md:grid-cols-2 gap-4"
-            >
-              <div>
-                <label className="text-sm font-medium text-gray-700">
-                  ID cita
-                </label>
-                <Input
-                  value={form.id || ""}
-                  onChange={(event) =>
-                    setForm({ ...form, id: event.target.value })
-                  }
-                  placeholder="Ej: CITA004"
-                  disabled={!!editingId}
-                  required={!editingId}
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700">
-                  Mascota
-                </label>
-                <select
-                  value={form.mascotaId}
-                  onChange={(event) =>
-                    setForm({ ...form, mascotaId: event.target.value })
-                  }
-                  className="w-full h-10 rounded-md border border-gray-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  required
-                >
-                  <option value="">Selecciona una mascota</option>
-                  {catalogos.mascotas.map((mascota) => (
-                    <option key={mascota.id} value={mascota.id}>
-                      {mascota.nombre} — {mascota.clienteNombre}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700">
-                  Veterinario
-                </label>
-                <select
-                  value={form.veterinarioId}
-                  onChange={(event) =>
-                    setForm({ ...form, veterinarioId: event.target.value })
-                  }
-                  className="w-full h-10 rounded-md border border-gray-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  required
-                >
-                  <option value="">Selecciona un veterinario</option>
-                  {catalogos.veterinarios.map((veterinario) => (
-                    <option key={veterinario.id} value={veterinario.id}>
-                      {veterinario.nombre}
-                      {veterinario.especialidad
-                        ? ` — ${veterinario.especialidad}`
-                        : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700">
-                  Recepcionista
-                </label>
-                <select
-                  value={form.recepcionistaId}
-                  onChange={(event) =>
-                    setForm({ ...form, recepcionistaId: event.target.value })
-                  }
-                  className="w-full h-10 rounded-md border border-gray-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  required
-                >
-                  <option value="">Selecciona un recepcionista</option>
-                  {catalogos.recepcionistas.map((recepcionista) => (
-                    <option key={recepcionista.id} value={recepcionista.id}>
-                      {recepcionista.nombre}
-                      {recepcionista.turno ? ` — ${recepcionista.turno}` : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700">
-                  Fecha
-                </label>
-                <Input
-                  type="date"
-                  value={form.fecha}
-                  onChange={(event) =>
-                    setForm({ ...form, fecha: event.target.value })
-                  }
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700">
-                  Hora
-                </label>
-                <Input
-                  type="time"
-                  value={form.hora}
-                  onChange={(event) =>
-                    setForm({ ...form, hora: event.target.value })
-                  }
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700">
-                  Estado
-                </label>
-                <select
-                  value={form.estado}
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      estado: event.target.value as EstadoCita,
-                    })
-                  }
-                  className="w-full h-10 rounded-md border border-gray-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  required
-                >
-                  {estadosCita.map((estado) => (
-                    <option key={estado} value={estado}>
-                      {estado}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="text-sm font-medium text-gray-700">
-                  Motivo
-                </label>
-                <textarea
-                  value={form.motivo || ""}
-                  onChange={(event) =>
-                    setForm({ ...form, motivo: event.target.value })
-                  }
-                  placeholder="Motivo de la consulta"
-                  className="w-full min-h-24 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div className="md:col-span-2 flex justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={limpiarFormulario}
-                  disabled={saving}
-                >
-                  Cancelar
-                </Button>
-
-                <Button type="submit" disabled={saving}>
-                  {saving
-                    ? "Guardando..."
-                    : editingId
-                      ? "Guardar cambios"
-                      : "Crear cita"}
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      )}
-
+      {/* Agenda de Hoy */}
       <Card>
-        <CardContent className="pt-6">
-          <div className="flex flex-col lg:flex-row gap-4">
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Buscar por ID, mascota, cliente, veterinario o motivo..."
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-            </div>
+        <CardHeader>
+          <CardTitle>Agenda de hoy - {formatearFechaTitulo(hoy)}</CardTitle>
+        </CardHeader>
 
-            <input
-              type="date"
-              value={fechaFiltro}
-              onChange={(event) => setFechaFiltro(event.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Hora
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Mascota
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Cliente
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Veterinario
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Recepcionista
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Motivo
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Estado
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Acciones
+                  </th>
+                </tr>
+              </thead>
 
-            <div className="flex flex-wrap gap-2">
-              {(["TODOS", ...estadosCita] as const).map((estado) => (
-                <button
-                  key={estado}
-                  onClick={() => setFilterEstado(estado)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    filterEstado === estado
-                      ? "bg-emerald-100 text-emerald-700"
-                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                  }`}
-                >
-                  {estado}
-                </button>
-              ))}
+              <tbody className="bg-white divide-y divide-gray-200">
+                {loading ? (
+                  <tr>
+                    <td
+                      colSpan={8}
+                      className="px-6 py-10 text-center text-gray-500"
+                    >
+                      Cargando citas...
+                    </td>
+                  </tr>
+                ) : citasHoy.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={8}
+                      className="px-6 py-10 text-center text-gray-500"
+                    >
+                      No hay citas registradas para hoy.
+                    </td>
+                  </tr>
+                ) : (
+                  citasHoy.map((cita) => (
+                    <tr key={cita.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        <div className="flex items-center gap-2">
+                          <Clock className="w-4 h-4" />
+                          {cita.hora}
+                        </div>
+                      </td>
 
-              {fechaFiltro && (
-                <button
-                  onClick={() => setFechaFiltro("")}
-                  className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200"
-                >
-                  Limpiar fecha
-                </button>
-              )}
-            </div>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div>
+                          <p className="font-medium text-gray-900">
+                            {cita.mascotaNombre}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {formatearVacio(cita.mascotaEspecie)}
+                          </p>
+                        </div>
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {cita.clienteNombre}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {cita.veterinarioNombre}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {cita.recepcionistaNombre}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {formatearVacio(cita.motivo)}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <EstadoBadge estado={cita.estado} />
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          {cita.estado === "PROGRAMADA" && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={guardando}
+                              onClick={() =>
+                                actualizarEstado(cita, "CONFIRMADA")
+                              }
+                            >
+                              Confirmar
+                            </Button>
+                          )}
+
+                          {(cita.estado === "PROGRAMADA" ||
+                            cita.estado === "CONFIRMADA" ||
+                            cita.estado === "REPROGRAMADA") && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={guardando}
+                                onClick={() => abrirReprogramar(cita)}
+                              >
+                                Reprogramar
+                              </Button>
+
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={guardando}
+                                onClick={() =>
+                                  actualizarEstado(cita, "CANCELADA")
+                                }
+                              >
+                                Cancelar
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </CardContent>
       </Card>
 
-      {selectedCita && (
-        <Card>
-          <CardHeader className="flex flex-row items-start justify-between">
-            <div>
-              <CardTitle>Detalle de la cita</CardTitle>
-              <p className="text-sm text-gray-500 mt-1">{selectedCita.id}</p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setSelectedCitaId(null)}
-              className="p-2 hover:bg-gray-100 rounded-lg"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </CardHeader>
-
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-              <div>
-                <p className="text-gray-500">Mascota</p>
-                <p className="font-medium text-gray-900">
-                  {selectedCita.mascotaNombre}
-                </p>
-                <p className="text-gray-500">
-                  {selectedCita.mascotaEspecie || "Sin especie"}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-gray-500">Cliente</p>
-                <p className="font-medium text-gray-900">
-                  {selectedCita.clienteNombre}
-                </p>
-                <p className="text-gray-500">
-                  {selectedCita.clienteTelefono || "Sin teléfono"}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-gray-500">Veterinario</p>
-                <p className="font-medium text-gray-900">
-                  {selectedCita.veterinarioNombre}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-gray-500">Recepcionista</p>
-                <p className="font-medium text-gray-900">
-                  {selectedCita.recepcionistaNombre}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-gray-500">Fecha y hora</p>
-                <p className="font-medium text-gray-900">
-                  {selectedCita.fecha} — {selectedCita.hora}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-gray-500">Estado</p>
-                <Badge variant={getBadgeVariant(selectedCita.estado)}>
-                  {selectedCita.estado}
-                </Badge>
-              </div>
-
-              <div className="md:col-span-3">
-                <p className="text-gray-500">Motivo</p>
-                <p className="font-medium text-gray-900">
-                  {selectedCita.motivo || "Sin motivo registrado"}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
+      {/* Próximas Citas */}
       <Card>
         <CardHeader>
-          <CardTitle>
-            Citas registradas{" "}
-            <span className="text-sm font-normal text-gray-500">
-              ({citasFiltradas.length})
-            </span>
-          </CardTitle>
+          <CardTitle>Próximas citas</CardTitle>
         </CardHeader>
 
         <CardContent>
-          {loading ? (
-            <div className="py-10 text-center text-gray-500">
-              Cargando citas...
-            </div>
-          ) : citasFiltradas.length === 0 ? (
-            <div className="py-10 text-center text-gray-500">
-              No hay citas para mostrar.
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Fecha</TableHead>
-                  <TableHead>Hora</TableHead>
-                  <TableHead>Mascota</TableHead>
-                  <TableHead>Cliente</TableHead>
-                  <TableHead>Veterinario</TableHead>
-                  <TableHead>Motivo</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead>Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Fecha
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Hora
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Mascota
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Cliente
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Veterinario
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Motivo
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Estado
+                  </th>
+                </tr>
+              </thead>
 
-              <TableBody>
-                {citasFiltradas.map((cita) => (
-                  <TableRow
-                    key={cita.id}
-                    onClick={() => setSelectedCitaId(cita.id)}
-                    className="cursor-pointer hover:bg-emerald-50/50"
-                  >
-                    <TableCell className="font-medium">
-                      <code className="text-xs bg-gray-100 px-2 py-1 rounded">
-                        {cita.id}
-                      </code>
-                    </TableCell>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {loading ? (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="px-6 py-10 text-center text-gray-500"
+                    >
+                      Cargando próximas citas...
+                    </td>
+                  </tr>
+                ) : citasFuturas.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="px-6 py-10 text-center text-gray-500"
+                    >
+                      No hay próximas citas.
+                    </td>
+                  </tr>
+                ) : (
+                  citasFuturas.map((cita) => (
+                    <tr key={cita.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {cita.fecha}
+                      </td>
 
-                    <TableCell>{cita.fecha}</TableCell>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {cita.hora}
+                      </td>
 
-                    <TableCell className="font-medium text-emerald-700">
-                      {cita.hora}
-                    </TableCell>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {cita.mascotaNombre}
+                      </td>
 
-                    <TableCell>
-                      <div>
-                        <p className="font-medium text-gray-900">
-                          {cita.mascotaNombre}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          {cita.mascotaEspecie}
-                        </p>
-                      </div>
-                    </TableCell>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {cita.clienteNombre}
+                      </td>
 
-                    <TableCell>{cita.clienteNombre}</TableCell>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {cita.veterinarioNombre}
+                      </td>
 
-                    <TableCell className="text-gray-600">
-                      {cita.veterinarioNombre}
-                    </TableCell>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {formatearVacio(cita.motivo)}
+                      </td>
 
-                    <TableCell className="text-gray-600 max-w-xs truncate">
-                      {cita.motivo || "Sin motivo"}
-                    </TableCell>
-
-                    <TableCell>
-                      <Badge variant={getBadgeVariant(cita.estado)}>
-                        {cita.estado}
-                      </Badge>
-                    </TableCell>
-
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            iniciarEdicion(cita);
-                          }}
-                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
-                          title="Editar"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            eliminarCita(cita);
-                          }}
-                          className="p-1.5 text-red-600 hover:bg-red-50 rounded"
-                          title="Eliminar"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <EstadoBadge estado={cita.estado} />
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </CardContent>
       </Card>
+
+      {/* Modal Crear / Reprogramar */}
+      {modalAbierto && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 px-4">
+          <div className="w-full max-w-3xl rounded-lg bg-white shadow-xl">
+            <form onSubmit={guardarCita}>
+              <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">
+                    {editando ? "Reprogramar cita" : "Nueva cita"}
+                  </h2>
+                  <p className="text-sm text-gray-500">
+                    Completa la información de la cita veterinaria
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={cerrarModal}
+                  className="p-2 hover:bg-gray-100 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-6 py-5">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    ID
+                  </label>
+
+                  <input
+                    type="text"
+                    value={form.id || ""}
+                    disabled={Boolean(editando)}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, id: event.target.value }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-gray-100"
+                    placeholder="CIT001"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Estado
+                  </label>
+
+                  <select
+                    value={form.estado}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        estado: event.target.value as EstadoCita,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    {estadosCita.map((estado) => (
+                      <option key={estado} value={estado}>
+                        {estado}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Mascota
+                  </label>
+
+                  <select
+                    value={form.mascotaId}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        mascotaId: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="">Selecciona una mascota</option>
+                    {catalogos.mascotas.map((mascota) => (
+                      <option key={mascota.id} value={mascota.id}>
+                        {mascota.nombre}
+                        {mascota.clienteNombre
+                          ? ` - ${mascota.clienteNombre}`
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Veterinario
+                  </label>
+
+                  <select
+                    value={form.veterinarioId}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        veterinarioId: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="">Selecciona un veterinario</option>
+                    {catalogos.veterinarios.map((veterinario) => (
+                      <option key={veterinario.id} value={veterinario.id}>
+                        {veterinario.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Recepcionista
+                  </label>
+
+                  <select
+                    value={form.recepcionistaId}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        recepcionistaId: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="">Selecciona una recepcionista</option>
+                    {catalogos.recepcionistas.map((recepcionista) => (
+                      <option key={recepcionista.id} value={recepcionista.id}>
+                        {recepcionista.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Fecha
+                  </label>
+
+                  <input
+                    type="date"
+                    value={form.fecha}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        fecha: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Hora
+                  </label>
+
+                  <input
+                    type="time"
+                    value={form.hora}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        hora: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Motivo
+                  </label>
+
+                  <textarea
+                    value={form.motivo || ""}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        motivo: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    rows={3}
+                    placeholder="Control de rutina"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-gray-200 px-6 py-4">
+                <Button type="button" variant="secondary" onClick={cerrarModal}>
+                  Cancelar
+                </Button>
+
+                <Button type="submit" disabled={guardando}>
+                  {guardando ? "Guardando..." : "Guardar cita"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,17 +1,23 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Activity,
-  CalendarDays,
-  CreditCard,
+  Calendar,
   DollarSign,
-  FileText,
-  HeartPulse,
   PawPrint,
-  RefreshCw,
-  Stethoscope,
-  Syringe,
+  TrendingUp,
   Users,
 } from "lucide-react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import {
   Card,
   CardContent,
@@ -19,7 +25,6 @@ import {
   CardTitle,
 } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
-import { Button } from "../components/ui/button";
 import {
   Table,
   TableBody,
@@ -29,12 +34,18 @@ import {
   TableRow,
 } from "../components/ui/table";
 import {
-  DashboardActividad,
+  Consulta,
   DashboardCitaHoy,
   DashboardResumen,
-  getDashboardActividadReciente,
+  Factura,
+  ReporteIngresoMensual,
+  ReporteTopServicio,
+  getConsultas,
   getDashboardCitasHoy,
   getDashboardResumen,
+  getFacturas,
+  getReporteIngresosMensuales,
+  getReporteTopServicios,
 } from "../services/api";
 
 const resumenInicial: DashboardResumen = {
@@ -53,65 +64,84 @@ const resumenInicial: DashboardResumen = {
   vacunasMes: 0,
 };
 
+const mesesCortos = [
+  "",
+  "Ene",
+  "Feb",
+  "Mar",
+  "Abr",
+  "May",
+  "Jun",
+  "Jul",
+  "Ago",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dic",
+];
+
 function formatoDinero(valor: number | string | null | undefined) {
-  return `$${Number(valor || 0).toLocaleString()}`;
+  return `$${Number(valor || 0).toLocaleString("es-CO")}`;
 }
 
-function getEstadoCitaClass(estado: string) {
-  if (estado === "CONFIRMADA")
-    return "bg-emerald-50 text-emerald-700 border-emerald-100";
-  if (estado === "ATENDIDA") return "bg-blue-50 text-blue-700 border-blue-100";
-  if (estado === "CANCELADA") return "bg-red-50 text-red-700 border-red-100";
-  if (estado === "REPROGRAMADA")
-    return "bg-purple-50 text-purple-700 border-purple-100";
-  return "bg-orange-50 text-orange-700 border-orange-100";
+function formatoDineroCorto(valor: number | string | null | undefined) {
+  const numero = Number(valor || 0);
+
+  if (numero >= 1_000_000) {
+    return `$${(numero / 1_000_000).toFixed(numero >= 10_000_000 ? 0 : 1)}M`;
+  }
+
+  if (numero >= 1_000) {
+    return `$${(numero / 1_000).toFixed(0)}k`;
+  }
+
+  return `$${numero.toLocaleString("es-CO")}`;
 }
 
-function getActividadClass(tipo: DashboardActividad["tipo"]) {
-  if (tipo === "FACTURA")
-    return "bg-emerald-50 text-emerald-700 border-emerald-100";
-  if (tipo === "CONSULTA") return "bg-blue-50 text-blue-700 border-blue-100";
-  if (tipo === "VACUNA")
-    return "bg-purple-50 text-purple-700 border-purple-100";
-  if (tipo === "TRATAMIENTO")
-    return "bg-orange-50 text-orange-700 border-orange-100";
-  return "bg-gray-50 text-gray-700 border-gray-100";
+function getBadgeVariant(estado: string) {
+  switch (estado) {
+    case "CONFIRMADA":
+      return "success";
+    case "PROGRAMADA":
+      return "info";
+    case "ATENDIDA":
+      return "default";
+    case "CANCELADA":
+      return "danger";
+    case "REPROGRAMADA":
+      return "warning";
+    default:
+      return "default";
+  }
 }
 
-function StatCard({
-  title,
-  value,
-  subtitle,
-  icon,
-}: {
-  title: string;
-  value: string | number;
-  subtitle?: string;
-  icon: React.ReactNode;
-}) {
-  return (
-    <Card>
-      <CardContent className="pt-6">
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 bg-emerald-50 rounded-xl flex items-center justify-center">
-            {icon}
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">{title}</p>
-            <p className="text-xl font-bold text-gray-900">{value}</p>
-            {subtitle && <p className="text-xs text-gray-400">{subtitle}</p>}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
+function normalizarIngresos(data: ReporteIngresoMensual[]) {
+  return data
+    .slice()
+    .sort((a, b) => Number(a.mesNumero) - Number(b.mesNumero))
+    .map((item) => ({
+      mes: mesesCortos[Number(item.mesNumero)] || item.mes,
+      ingresos: Number(item.ingresosPagados || item.valorTotal || 0),
+    }));
+}
+
+function normalizarTopServicios(data: ReporteTopServicio[]) {
+  return data.map((item) => ({
+    servicio: item.servicioNombre,
+    cantidad: Number(item.vecesUsado || 0),
+    monto: Number(item.ingresosPagados || 0),
+  }));
 }
 
 export function Dashboard() {
   const [resumen, setResumen] = useState<DashboardResumen>(resumenInicial);
   const [citasHoy, setCitasHoy] = useState<DashboardCitaHoy[]>([]);
-  const [actividad, setActividad] = useState<DashboardActividad[]>([]);
-
+  const [consultas, setConsultas] = useState<Consulta[]>([]);
+  const [facturas, setFacturas] = useState<Factura[]>([]);
+  const [ingresosMensuales, setIngresosMensuales] = useState<
+    ReporteIngresoMensual[]
+  >([]);
+  const [serviciosTop, setServiciosTop] = useState<ReporteTopServicio[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -120,15 +150,30 @@ export function Dashboard() {
       setLoading(true);
       setError("");
 
-      const [resumenData, citasData, actividadData] = await Promise.all([
+      const anioActual = new Date().getFullYear();
+
+      const [
+        resumenData,
+        citasData,
+        consultasData,
+        facturasData,
+        ingresosData,
+        serviciosData,
+      ] = await Promise.all([
         getDashboardResumen(),
         getDashboardCitasHoy(),
-        getDashboardActividadReciente(10),
+        getConsultas(),
+        getFacturas(),
+        getReporteIngresosMensuales(anioActual),
+        getReporteTopServicios(5),
       ]);
 
       setResumen(resumenData);
       setCitasHoy(citasData);
-      setActividad(actividadData);
+      setConsultas(consultasData);
+      setFacturas(facturasData);
+      setIngresosMensuales(ingresosData);
+      setServiciosTop(serviciosData);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error cargando dashboard");
     } finally {
@@ -140,34 +185,44 @@ export function Dashboard() {
     cargarDatos();
   }, []);
 
-  const progresoCitas = useMemo(() => {
-    const total = Number(resumen.citasHoy || 0);
-    if (total === 0) return 0;
+  const facturasPagadas = useMemo(
+    () => facturas.filter((factura) => factura.estadoPago === "PAGADA").length,
+    [facturas],
+  );
 
-    const atendidas = citasHoy.filter(
-      (cita) => cita.estado === "ATENDIDA",
-    ).length;
-    return Math.round((atendidas / total) * 100);
-  }, [resumen.citasHoy, citasHoy]);
+  const citasHoyVisibles = useMemo(() => citasHoy.slice(0, 5), [citasHoy]);
 
-  const citasPendientesHoy = citasHoy.filter((cita) =>
-    ["PROGRAMADA", "CONFIRMADA", "REPROGRAMADA"].includes(cita.estado),
+  const atencionesRecientes = useMemo(
+    () =>
+      consultas
+        .slice()
+        .sort(
+          (a, b) =>
+            new Date(b.fechaAtencionReal).getTime() -
+            new Date(a.fechaAtencionReal).getTime(),
+        )
+        .slice(0, 4),
+    [consultas],
+  );
+
+  const ingresosChartData = useMemo(
+    () => normalizarIngresos(ingresosMensuales),
+    [ingresosMensuales],
+  );
+
+  const serviciosChartData = useMemo(
+    () => normalizarTopServicios(serviciosTop),
+    [serviciosTop],
   );
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-500 mt-1">
-            Resumen operativo en tiempo real conectado a Oracle.
-          </p>
-        </div>
-
-        <Button type="button" variant="secondary" onClick={cargarDatos}>
-          <RefreshCw className="w-4 h-4 mr-2" />
-          Actualizar
-        </Button>
+      {/* Page Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+        <p className="text-gray-500 mt-1">
+          Bienvenido al panel de administración VetCare
+        </p>
       </div>
 
       {error && (
@@ -182,127 +237,202 @@ export function Dashboard() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <StatCard
-              title="Clientes activos"
-              value={resumen.clientesActivos}
-              subtitle={`${resumen.totalClientes} clientes registrados`}
-              icon={<Users className="w-5 h-5 text-emerald-600" />}
-            />
-
-            <StatCard
-              title="Mascotas"
-              value={resumen.totalMascotas}
-              subtitle="Registradas en el sistema"
-              icon={<PawPrint className="w-5 h-5 text-emerald-600" />}
-            />
-
-            <StatCard
-              title="Citas de hoy"
-              value={resumen.citasHoy}
-              subtitle={`${citasPendientesHoy.length} pendientes`}
-              icon={<CalendarDays className="w-5 h-5 text-emerald-600" />}
-            />
-
-            <StatCard
-              title="Ingresos del mes"
-              value={formatoDinero(resumen.ingresosMes)}
-              subtitle={`${formatoDinero(resumen.ingresosHoy)} hoy`}
-              icon={<DollarSign className="w-5 h-5 text-emerald-600" />}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <StatCard
-              title="Consultas del mes"
-              value={resumen.consultasMes}
-              subtitle="Atenciones registradas"
-              icon={<Stethoscope className="w-5 h-5 text-blue-600" />}
-            />
-
-            <StatCard
-              title="Tratamientos activos"
-              value={resumen.tratamientosActivos}
-              subtitle="Seguimiento clínico"
-              icon={<HeartPulse className="w-5 h-5 text-blue-600" />}
-            />
-
-            <StatCard
-              title="Vacunas del mes"
-              value={resumen.vacunasMes}
-              subtitle="Aplicaciones registradas"
-              icon={<Syringe className="w-5 h-5 text-blue-600" />}
-            />
-
-            <StatCard
-              title="Facturas pendientes"
-              value={resumen.facturasPendientes}
-              subtitle={`Total pagado: ${formatoDinero(resumen.ingresosTotal)}`}
-              icon={<CreditCard className="w-5 h-5 text-blue-600" />}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <Card className="lg:col-span-2">
-              <CardHeader>
+          {/* Stats Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+            <Card>
+              <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
-                  <CardTitle>Citas de hoy</CardTitle>
-                  <Badge className="bg-emerald-50 text-emerald-700 border-emerald-100">
-                    {progresoCitas}% atendidas
-                  </Badge>
+                  <div>
+                    <p className="text-sm text-gray-500">Clientes activos</p>
+                    <p className="text-2xl font-bold text-gray-900 mt-1">
+                      {resumen.clientesActivos}
+                    </p>
+                  </div>
+
+                  <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                    <Users className="w-6 h-6 text-blue-600" />
+                  </div>
                 </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-500">
+                      Mascotas registradas
+                    </p>
+                    <p className="text-2xl font-bold text-gray-900 mt-1">
+                      {resumen.totalMascotas}
+                    </p>
+                  </div>
+
+                  <div className="w-12 h-12 bg-emerald-100 rounded-lg flex items-center justify-center">
+                    <PawPrint className="w-6 h-6 text-emerald-600" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-500">Citas de hoy</p>
+                    <p className="text-2xl font-bold text-gray-900 mt-1">
+                      {resumen.citasHoy || citasHoy.length}
+                    </p>
+                  </div>
+
+                  <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                    <Calendar className="w-6 h-6 text-purple-600" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-500">Facturas pagadas</p>
+                    <p className="text-2xl font-bold text-gray-900 mt-1">
+                      {facturasPagadas}
+                    </p>
+                  </div>
+
+                  <div className="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center">
+                    <DollarSign className="w-6 h-6 text-amber-600" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-500">Ingresos del mes</p>
+                    <p className="text-2xl font-bold text-gray-900 mt-1">
+                      {formatoDineroCorto(resumen.ingresosMes)}
+                    </p>
+                  </div>
+
+                  <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                    <TrendingUp className="w-6 h-6 text-green-600" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-500">
+                      Tratamientos activos
+                    </p>
+                    <p className="text-2xl font-bold text-gray-900 mt-1">
+                      {resumen.tratamientosActivos}
+                    </p>
+                  </div>
+
+                  <div className="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center">
+                    <Activity className="w-6 h-6 text-red-600" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Próximas Citas */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Próximas citas de hoy</CardTitle>
               </CardHeader>
 
               <CardContent>
-                {citasHoy.length === 0 ? (
+                {citasHoyVisibles.length === 0 ? (
                   <div className="py-8 text-center text-gray-500">
                     No hay citas programadas para hoy.
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {citasHoyVisibles.map((cita) => (
+                      <div
+                        key={cita.id}
+                        className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                      >
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-gray-900">
+                              {cita.hora}
+                            </span>
+
+                            <Badge
+                              variant={getBadgeVariant(cita.estado)}
+                              size="sm"
+                            >
+                              {cita.estado}
+                            </Badge>
+                          </div>
+
+                          <p className="text-sm text-gray-600 mt-1">
+                            {cita.mascotaNombre} - {cita.clienteNombre}
+                          </p>
+
+                          <p className="text-xs text-gray-500">
+                            {cita.veterinarioNombre}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Mascotas Atendidas Recientemente */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Atenciones recientes</CardTitle>
+              </CardHeader>
+
+              <CardContent>
+                {atencionesRecientes.length === 0 ? (
+                  <div className="py-8 text-center text-gray-500">
+                    No hay atenciones recientes.
                   </div>
                 ) : (
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Hora</TableHead>
-                        <TableHead>Mascota / Cliente</TableHead>
-                        <TableHead>Veterinario</TableHead>
-                        <TableHead>Motivo</TableHead>
-                        <TableHead>Estado</TableHead>
+                        <TableHead>Mascota</TableHead>
+                        <TableHead>Fecha</TableHead>
+                        <TableHead>Servicio</TableHead>
                       </TableRow>
                     </TableHeader>
 
                     <TableBody>
-                      {citasHoy.map((cita) => (
-                        <TableRow key={cita.id}>
+                      {atencionesRecientes.map((atencion) => (
+                        <TableRow key={atencion.id}>
                           <TableCell>
                             <div>
-                              <p className="font-medium text-gray-900">
-                                {cita.hora}
-                              </p>
-                              <p className="text-xs text-gray-500">{cita.id}</p>
-                            </div>
-                          </TableCell>
-
-                          <TableCell>
-                            <div>
-                              <p className="font-medium text-gray-900">
-                                {cita.mascotaNombre}
+                              <p className="font-medium">
+                                {atencion.mascotaNombre}
                               </p>
                               <p className="text-xs text-gray-500">
-                                {cita.mascotaEspecie} · {cita.clienteNombre}
+                                {atencion.mascotaEspecie}
                               </p>
                             </div>
                           </TableCell>
 
-                          <TableCell>{cita.veterinarioNombre}</TableCell>
+                          <TableCell>{atencion.fechaAtencionReal}</TableCell>
 
-                          <TableCell>
-                            {cita.motivo || "Sin motivo registrado"}
-                          </TableCell>
-
-                          <TableCell>
-                            <Badge className={getEstadoCitaClass(cita.estado)}>
-                              {cita.estado}
-                            </Badge>
+                          <TableCell className="text-gray-600">
+                            {atencion.servicioNombre}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -311,119 +441,73 @@ export function Dashboard() {
                 )}
               </CardContent>
             </Card>
+          </div>
 
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Gráfico de Ingresos */}
             <Card>
               <CardHeader>
-                <CardTitle>Resumen operativo</CardTitle>
+                <CardTitle>Ingresos mensuales</CardTitle>
               </CardHeader>
 
-              <CardContent className="space-y-4">
-                <div>
-                  <div className="flex items-center justify-between text-sm mb-1">
-                    <span className="text-gray-500">Citas atendidas hoy</span>
-                    <span className="font-medium text-gray-900">
-                      {progresoCitas}%
-                    </span>
+              <CardContent>
+                {ingresosChartData.length === 0 ? (
+                  <div className="h-[300px] flex items-center justify-center text-gray-500">
+                    No hay datos de ingresos para graficar.
                   </div>
-                  <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-2 bg-emerald-500 rounded-full"
-                      style={{ width: `${progresoCitas}%` }}
-                    />
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <LineChart data={ingresosChartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="mes" />
+                      <YAxis />
+                      <Tooltip
+                        formatter={(value) => formatoDinero(Number(value))}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="ingresos"
+                        stroke="#10b981"
+                        strokeWidth={2}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Top Servicios */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Top 5 servicios facturados</CardTitle>
+              </CardHeader>
+
+              <CardContent>
+                {serviciosChartData.length === 0 ? (
+                  <div className="h-[300px] flex items-center justify-center text-gray-500">
+                    No hay datos de servicios para graficar.
                   </div>
-                </div>
-
-                <div className="rounded-lg border bg-gray-50 px-4 py-3">
-                  <p className="text-sm text-gray-500">
-                    Citas pendientes futuras
-                  </p>
-                  <p className="text-xl font-bold text-gray-900">
-                    {resumen.citasPendientes}
-                  </p>
-                </div>
-
-                <div className="rounded-lg border bg-gray-50 px-4 py-3">
-                  <p className="text-sm text-gray-500">Empleados activos</p>
-                  <p className="text-xl font-bold text-gray-900">
-                    {resumen.empleadosActivos}
-                  </p>
-                </div>
-
-                <div className="rounded-lg border bg-gray-50 px-4 py-3">
-                  <p className="text-sm text-gray-500">
-                    Ingresos históricos pagados
-                  </p>
-                  <p className="text-xl font-bold text-gray-900">
-                    {formatoDinero(resumen.ingresosTotal)}
-                  </p>
-                </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={serviciosChartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis
+                        dataKey="servicio"
+                        angle={-45}
+                        textAnchor="end"
+                        height={100}
+                      />
+                      <YAxis />
+                      <Tooltip
+                        formatter={(value) => formatoDinero(Number(value))}
+                      />
+                      <Bar dataKey="monto" fill="#10b981" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
               </CardContent>
             </Card>
           </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Actividad reciente</CardTitle>
-            </CardHeader>
-
-            <CardContent>
-              {actividad.length === 0 ? (
-                <div className="py-8 text-center text-gray-500">
-                  No hay actividad reciente.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {actividad.map((item, index) => (
-                    <div
-                      key={`${item.tipo}-${item.id}-${index}`}
-                      className="flex flex-col gap-2 rounded-lg border px-4 py-3 md:flex-row md:items-center md:justify-between"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="w-9 h-9 bg-gray-50 rounded-lg flex items-center justify-center">
-                          {item.tipo === "FACTURA" ? (
-                            <FileText className="w-4 h-4 text-emerald-600" />
-                          ) : item.tipo === "CONSULTA" ? (
-                            <Stethoscope className="w-4 h-4 text-blue-600" />
-                          ) : item.tipo === "VACUNA" ? (
-                            <Syringe className="w-4 h-4 text-purple-600" />
-                          ) : item.tipo === "TRATAMIENTO" ? (
-                            <HeartPulse className="w-4 h-4 text-orange-600" />
-                          ) : (
-                            <Activity className="w-4 h-4 text-gray-600" />
-                          )}
-                        </div>
-
-                        <div>
-                          <p className="font-medium text-gray-900">
-                            {item.titulo}
-                          </p>
-                          <p className="text-sm text-gray-500">
-                            {item.descripcion}
-                          </p>
-                          <p className="text-xs text-gray-400">
-                            {item.fecha}
-                            {item.hora ? ` · ${item.hora}` : ""}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <Badge className={getActividadClass(item.tipo)}>
-                          {item.tipo}
-                        </Badge>
-
-                        {item.estado && (
-                          <Badge className="bg-gray-50 text-gray-700 border-gray-100">
-                            {item.estado}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
         </>
       )}
     </div>

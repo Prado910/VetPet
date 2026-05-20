@@ -1,52 +1,31 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Edit2, Plus, Stethoscope, Trash2, UserCog } from "lucide-react";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "../components/ui/card";
-import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../components/ui/table";
-import {
-  Plus,
-  Edit2,
-  Trash2,
-  UserCog,
-  Stethoscope,
-  RefreshCw,
-  Search,
-  X,
-} from "lucide-react";
-import {
+import type {
   Empleado,
   EmpleadoInput,
   EstadoLaboralEmpleado,
   TipoEmpleado,
   TurnoRecepcionista,
+} from "../services/api";
+import {
   createEmpleado,
   deleteEmpleado,
   getEmpleados,
   updateEmpleado,
 } from "../services/api";
 
-type BadgeVariant =
-  | "success"
-  | "warning"
-  | "danger"
-  | "info"
-  | "default"
-  | "purple";
-
-const fechaHoy = () => new Date().toISOString().slice(0, 10);
+const fechaHoy = () => {
+  const fecha = new Date();
+  const local = new Date(fecha.getTime() - fecha.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+};
 
 const estadoInicial: EmpleadoInput = {
   id: "",
@@ -61,13 +40,65 @@ const estadoInicial: EmpleadoInput = {
   turno: "DIURNO",
 };
 
+function formatearDinero(valor: number | string | null | undefined) {
+  return `$${Number(valor || 0).toLocaleString("es-CO")}`;
+}
+
+function formatearVacio(valor?: string | number | null) {
+  if (valor === null || valor === undefined || valor === "") {
+    return "Sin registrar";
+  }
+
+  return String(valor);
+}
+
+function getBadgeClassName(valor: string) {
+  const texto = valor.toUpperCase();
+
+  if (texto === "ACTIVO") {
+    return "bg-emerald-100 text-emerald-700 border-emerald-300";
+  }
+
+  if (texto === "INACTIVO" || texto === "SUSPENDIDO") {
+    return "bg-red-100 text-red-700 border-red-300";
+  }
+
+  if (texto === "DIURNO") {
+    return "bg-amber-100 text-amber-700 border-amber-300";
+  }
+
+  if (texto === "NOCTURNO") {
+    return "bg-purple-100 text-purple-700 border-purple-300";
+  }
+
+  return "bg-blue-100 text-blue-700 border-blue-300";
+}
+
+function Badge({
+  children,
+  size = "md",
+}: {
+  children: React.ReactNode;
+  size?: "sm" | "md";
+}) {
+  const texto = String(children || "");
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border font-medium ${getBadgeClassName(
+        texto,
+      )} ${size === "sm" ? "px-2 py-0.5 text-xs" : "px-3 py-1 text-sm"}`}
+    >
+      {children}
+    </span>
+  );
+}
+
 export function Empleados() {
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [filterTipo, setFilterTipo] = useState<"TODOS" | TipoEmpleado>("TODOS");
   const [form, setForm] = useState<EmpleadoInput>(estadoInicial);
-  const [showForm, setShowForm] = useState(false);
+  const [editando, setEditando] = useState<Empleado | null>(null);
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -76,6 +107,7 @@ export function Empleados() {
     try {
       setLoading(true);
       setError("");
+
       const data = await getEmpleados();
       setEmpleados(data);
     } catch (err) {
@@ -93,128 +125,101 @@ export function Empleados() {
     cargarEmpleados();
   }, []);
 
-  const empleadosFiltrados = useMemo(() => {
-    const search = searchTerm.toLowerCase().trim();
+  const veterinarios = useMemo(
+    () =>
+      empleados.filter((empleado) => empleado.tipoEmpleado === "VETERINARIO"),
+    [empleados],
+  );
 
-    return empleados.filter((empleado) => {
-      const matchesSearch =
-        empleado.id.toLowerCase().includes(search) ||
-        empleado.nombre.toLowerCase().includes(search) ||
-        (empleado.telefono || "").toLowerCase().includes(search) ||
-        (empleado.especialidad || "").toLowerCase().includes(search) ||
-        (empleado.nroMatricula || "").toLowerCase().includes(search) ||
-        (empleado.turno || "").toLowerCase().includes(search);
+  const recepcionistas = useMemo(
+    () =>
+      empleados.filter((empleado) => empleado.tipoEmpleado === "RECEPCIONISTA"),
+    [empleados],
+  );
 
-      const matchesTipo =
-        filterTipo === "TODOS" || empleado.tipoEmpleado === filterTipo;
-
-      return matchesSearch && matchesTipo;
+  const abrirNuevoEmpleado = () => {
+    setEditando(null);
+    setForm({
+      ...estadoInicial,
+      fechaIngreso: fechaHoy(),
     });
-  }, [empleados, searchTerm, filterTipo]);
-
-  const veterinarios = empleados.filter(
-    (empleado) => empleado.tipoEmpleado === "VETERINARIO",
-  );
-
-  const recepcionistas = empleados.filter(
-    (empleado) => empleado.tipoEmpleado === "RECEPCIONISTA",
-  );
-
-  const getBadgeEstado = (estado: EstadoLaboralEmpleado): BadgeVariant => {
-    switch (estado) {
-      case "ACTIVO":
-        return "success";
-      case "INACTIVO":
-        return "warning";
-      case "SUSPENDIDO":
-        return "danger";
-      default:
-        return "default";
-    }
-  };
-
-  const abrirNuevo = () => {
-    setEditingId(null);
-    setForm({ ...estadoInicial, fechaIngreso: fechaHoy() });
-    setShowForm(true);
     setError("");
+
+    setTimeout(() => {
+      document
+        .getElementById("form-empleado")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
   };
 
-  const abrirEditar = (empleado: Empleado) => {
-    setEditingId(empleado.id);
+  const abrirEditarEmpleado = (empleado: Empleado) => {
+    setEditando(empleado);
+    setError("");
+
     setForm({
       id: empleado.id,
-      nombre: empleado.nombre,
+      nombre: empleado.nombre || "",
       telefono: empleado.telefono || "",
-      fechaIngreso: empleado.fechaIngreso,
+      fechaIngreso: empleado.fechaIngreso || fechaHoy(),
       estadoLaboral: empleado.estadoLaboral,
       tipoEmpleado: empleado.tipoEmpleado,
-      salario: empleado.salario,
+      salario: empleado.salario ?? "",
       especialidad: empleado.especialidad || "",
       nroMatricula: empleado.nroMatricula || "",
       turno: empleado.turno || "DIURNO",
     });
-    setShowForm(true);
+
+    setTimeout(() => {
+      document
+        .getElementById("form-empleado")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+  };
+
+  const limpiarFormulario = () => {
+    setEditando(null);
+    setForm({
+      ...estadoInicial,
+      fechaIngreso: fechaHoy(),
+    });
     setError("");
   };
-
-  const cerrarFormulario = () => {
-    setEditingId(null);
-    setForm({ ...estadoInicial, fechaIngreso: fechaHoy() });
-    setShowForm(false);
-    setError("");
-  };
-
-  const validarFormulario = () => {
-    if (!editingId && !form.id?.trim()) {
-      return "El ID del empleado es obligatorio.";
-    }
-
-    if (!form.nombre.trim()) {
-      return "El nombre del empleado es obligatorio.";
-    }
-
-    if (!form.fechaIngreso) {
-      return "La fecha de ingreso es obligatoria.";
-    }
-
-    if (form.salario === "" || Number(form.salario) < 0) {
-      return "El salario debe ser mayor o igual a cero.";
-    }
-
-    if (form.tipoEmpleado === "RECEPCIONISTA" && !form.turno) {
-      return "El turno es obligatorio para recepcionistas.";
-    }
-
-    return null;
-  };
-
-  const limpiarPayload = (): EmpleadoInput => ({
-    ...form,
-    id: form.id?.trim(),
-    nombre: form.nombre.trim(),
-    telefono: form.telefono?.trim() || null,
-    salario: Number(form.salario),
-    especialidad:
-      form.tipoEmpleado === "VETERINARIO"
-        ? form.especialidad?.trim() || null
-        : null,
-    nroMatricula:
-      form.tipoEmpleado === "VETERINARIO"
-        ? form.nroMatricula?.trim() || null
-        : null,
-    turno:
-      form.tipoEmpleado === "RECEPCIONISTA"
-        ? (form.turno as TurnoRecepcionista)
-        : null,
-  });
 
   const guardarEmpleado = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    const errorFormulario = validarFormulario();
-    if (errorFormulario) {
-      setError(errorFormulario);
+    if (!form.nombre.trim()) {
+      setError("El nombre completo es obligatorio.");
+      return;
+    }
+
+    if (!editando && !form.id?.trim()) {
+      setError("El ID del empleado es obligatorio.");
+      return;
+    }
+
+    if (!form.tipoEmpleado) {
+      setError("Selecciona el tipo de empleado.");
+      return;
+    }
+
+    if (!form.fechaIngreso) {
+      setError("La fecha de ingreso es obligatoria.");
+      return;
+    }
+
+    if (Number(form.salario || 0) < 0) {
+      setError("El salario no puede ser negativo.");
+      return;
+    }
+
+    if (form.tipoEmpleado === "VETERINARIO" && !form.especialidad?.trim()) {
+      setError("La especialidad es obligatoria para veterinarios.");
+      return;
+    }
+
+    if (form.tipoEmpleado === "VETERINARIO" && !form.nroMatricula?.trim()) {
+      setError("La matrícula es obligatoria para veterinarios.");
       return;
     }
 
@@ -222,20 +227,36 @@ export function Empleados() {
       setSaving(true);
       setError("");
 
-      const payload = limpiarPayload();
+      const payload: EmpleadoInput = {
+        id: editando ? editando.id : form.id?.trim(),
+        nombre: form.nombre.trim(),
+        telefono: form.telefono?.trim() || null,
+        fechaIngreso: form.fechaIngreso,
+        estadoLaboral: form.estadoLaboral,
+        tipoEmpleado: form.tipoEmpleado,
+        salario: Number(form.salario || 0),
+        especialidad:
+          form.tipoEmpleado === "VETERINARIO"
+            ? form.especialidad?.trim() || null
+            : null,
+        nroMatricula:
+          form.tipoEmpleado === "VETERINARIO"
+            ? form.nroMatricula?.trim() || null
+            : null,
+        turno:
+          form.tipoEmpleado === "RECEPCIONISTA" ? form.turno || "DIURNO" : null,
+      };
 
-      if (editingId) {
-        await updateEmpleado(editingId, payload);
+      if (editando) {
+        await updateEmpleado(editando.id, payload);
       } else {
         await createEmpleado(payload);
       }
 
       await cargarEmpleados();
-      cerrarFormulario();
+      limpiarFormulario();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "No se pudo guardar el empleado.",
-      );
+      setError(err instanceof Error ? err.message : "Error guardando empleado");
     } finally {
       setSaving(false);
     }
@@ -243,7 +264,7 @@ export function Empleados() {
 
   const eliminarEmpleado = async (empleado: Empleado) => {
     const confirmado = window.confirm(
-      `¿Eliminar a ${empleado.nombre}? Si tiene citas o tratamientos relacionados, la base de datos bloqueará la eliminación.`,
+      `¿Seguro que deseas eliminar a ${empleado.nombre}?`,
     );
 
     if (!confirmado) return;
@@ -251,47 +272,34 @@ export function Empleados() {
     try {
       setError("");
       await deleteEmpleado(empleado.id);
+
+      if (editando?.id === empleado.id) {
+        limpiarFormulario();
+      }
+
       await cargarEmpleados();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "No se pudo eliminar el empleado.",
+        err instanceof Error ? err.message : "Error eliminando empleado",
       );
     }
   };
 
-  const actualizarCampo = <K extends keyof EmpleadoInput>(
-    campo: K,
-    valor: EmpleadoInput[K],
-  ) => {
-    setForm((prev) => ({
-      ...prev,
-      [campo]: valor,
-    }));
-  };
-
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      {/* Page Header */}
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Empleados</h1>
           <p className="text-gray-500 mt-1">
-            Gestiona veterinarios y recepcionistas conectados a Oracle
+            Gestiona el personal de la veterinaria
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button
-            variant="secondary"
-            onClick={cargarEmpleados}
-            disabled={loading}
-          >
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Actualizar
-          </Button>
-          <Button onClick={abrirNuevo}>
-            <Plus className="w-4 h-4 mr-2" />
-            Nuevo empleado
-          </Button>
-        </div>
+
+        <Button onClick={abrirNuevoEmpleado}>
+          <Plus className="w-4 h-4 mr-2" />
+          Nuevo empleado
+        </Button>
       </div>
 
       {error && (
@@ -300,6 +308,7 @@ export function Empleados() {
         </div>
       )}
 
+      {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardContent className="pt-6">
@@ -307,6 +316,7 @@ export function Empleados() {
               <div className="w-12 h-12 bg-emerald-100 rounded-lg flex items-center justify-center">
                 <UserCog className="w-6 h-6 text-emerald-600" />
               </div>
+
               <div>
                 <p className="text-sm text-gray-500">Total empleados</p>
                 <p className="text-2xl font-bold text-gray-900">
@@ -323,6 +333,7 @@ export function Empleados() {
               <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
                 <Stethoscope className="w-6 h-6 text-blue-600" />
               </div>
+
               <div>
                 <p className="text-sm text-gray-500">Veterinarios</p>
                 <p className="text-2xl font-bold text-gray-900">
@@ -339,6 +350,7 @@ export function Empleados() {
               <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
                 <UserCog className="w-6 h-6 text-purple-600" />
               </div>
+
               <div>
                 <p className="text-sm text-gray-500">Recepcionistas</p>
                 <p className="text-2xl font-bold text-gray-900">
@@ -350,53 +362,350 @@ export function Empleados() {
         </Card>
       </div>
 
-      {showForm && (
+      {/* Veterinarios */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Veterinarios</CardTitle>
+        </CardHeader>
+
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    ID
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Nombre completo
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Especialidad
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Matrícula
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Teléfono
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Fecha ingreso
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Salario
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Estado
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Acciones
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="bg-white divide-y divide-gray-200">
+                {loading ? (
+                  <tr>
+                    <td
+                      colSpan={9}
+                      className="px-6 py-10 text-center text-gray-500"
+                    >
+                      Cargando veterinarios...
+                    </td>
+                  </tr>
+                ) : veterinarios.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={9}
+                      className="px-6 py-10 text-center text-gray-500"
+                    >
+                      No hay veterinarios registrados.
+                    </td>
+                  </tr>
+                ) : (
+                  veterinarios.map((empleado, index) => (
+                    <tr key={empleado.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        #{index + 1}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {empleado.nombre}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <Badge>{formatearVacio(empleado.especialidad)}</Badge>
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <code className="text-xs bg-gray-100 px-2 py-1 rounded">
+                          {formatearVacio(empleado.nroMatricula)}
+                        </code>
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {formatearVacio(empleado.telefono)}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {formatearVacio(empleado.fechaIngreso)}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {formatearDinero(empleado.salario)}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <Badge>{empleado.estadoLaboral}</Badge>
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => abrirEditarEmpleado(empleado)}
+                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
+                            title="Editar empleado"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => eliminarEmpleado(empleado)}
+                            className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                            title="Eliminar empleado"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Recepcionistas */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Recepcionistas</CardTitle>
+        </CardHeader>
+
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    ID
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Nombre completo
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Turno
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Teléfono
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Fecha ingreso
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Salario
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Estado
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Acciones
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="bg-white divide-y divide-gray-200">
+                {loading ? (
+                  <tr>
+                    <td
+                      colSpan={8}
+                      className="px-6 py-10 text-center text-gray-500"
+                    >
+                      Cargando recepcionistas...
+                    </td>
+                  </tr>
+                ) : recepcionistas.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={8}
+                      className="px-6 py-10 text-center text-gray-500"
+                    >
+                      No hay recepcionistas registrados.
+                    </td>
+                  </tr>
+                ) : (
+                  recepcionistas.map((empleado, index) => (
+                    <tr key={empleado.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        #{index + 1 + veterinarios.length}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {empleado.nombre}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <Badge>{formatearVacio(empleado.turno)}</Badge>
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {formatearVacio(empleado.telefono)}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {formatearVacio(empleado.fechaIngreso)}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {formatearDinero(empleado.salario)}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <Badge>{empleado.estadoLaboral}</Badge>
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => abrirEditarEmpleado(empleado)}
+                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
+                            title="Editar empleado"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => eliminarEmpleado(empleado)}
+                            className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                            title="Eliminar empleado"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Formulario de empleado */}
+      <div id="form-empleado">
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>
-                {editingId ? "Editar empleado" : "Agregar nuevo empleado"}
-              </CardTitle>
-              <Button variant="ghost" size="sm" onClick={cerrarFormulario}>
-                <X className="w-4 h-4" />
-              </Button>
-            </div>
+            <CardTitle>
+              {editando ? "Editar empleado" : "Agregar nuevo empleado"}
+            </CardTitle>
           </CardHeader>
-          <CardContent>
-            <form onSubmit={guardarEmpleado} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input
-                  label="ID del empleado"
-                  value={form.id || ""}
-                  onChange={(event) =>
-                    actualizarCampo("id", event.target.value)
-                  }
-                  disabled={Boolean(editingId)}
-                  placeholder="Ej: EMP006"
-                />
 
-                <Input
-                  label="Nombre completo"
-                  value={form.nombre}
-                  onChange={(event) =>
-                    actualizarCampo("nombre", event.target.value)
-                  }
-                  placeholder="Ej: Dra. Ana Gómez"
-                />
+          <CardContent>
+            <form onSubmit={guardarEmpleado}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    ID
+                  </label>
+
+                  <input
+                    type="text"
+                    value={form.id || ""}
+                    disabled={Boolean(editando)}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        id: event.target.value,
+                      }))
+                    }
+                    placeholder="EMP001"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-gray-100"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Estado laboral
+                  </label>
+
+                  <select
+                    value={form.estadoLaboral}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        estadoLaboral: event.target
+                          .value as EstadoLaboralEmpleado,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="ACTIVO">ACTIVO</option>
+                    <option value="INACTIVO">INACTIVO</option>
+                    <option value="SUSPENDIDO">SUSPENDIDO</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Nombre completo
+                  </label>
+
+                  <input
+                    type="text"
+                    value={form.nombre}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        nombre: event.target.value,
+                      }))
+                    }
+                    placeholder="Ej: Dr. Juan Pérez"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Tipo de empleado
                   </label>
+
                   <select
                     value={form.tipoEmpleado}
                     onChange={(event) =>
-                      actualizarCampo(
-                        "tipoEmpleado",
-                        event.target.value as TipoEmpleado,
-                      )
+                      setForm((prev) => ({
+                        ...prev,
+                        tipoEmpleado: event.target.value as TipoEmpleado,
+                        especialidad:
+                          event.target.value === "VETERINARIO"
+                            ? prev.especialidad
+                            : "",
+                        nroMatricula:
+                          event.target.value === "VETERINARIO"
+                            ? prev.nroMatricula
+                            : "",
+                        turno:
+                          event.target.value === "RECEPCIONISTA"
+                            ? prev.turno || "DIURNO"
+                            : null,
+                      }))
                     }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
                     <option value="VETERINARIO">VETERINARIO</option>
                     <option value="RECEPCIONISTA">RECEPCIONISTA</option>
@@ -405,87 +714,118 @@ export function Empleados() {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Estado laboral
+                    Teléfono
                   </label>
-                  <select
-                    value={form.estadoLaboral}
+
+                  <input
+                    type="tel"
+                    value={form.telefono || ""}
                     onChange={(event) =>
-                      actualizarCampo(
-                        "estadoLaboral",
-                        event.target.value as EstadoLaboralEmpleado,
-                      )
+                      setForm((prev) => ({
+                        ...prev,
+                        telefono: event.target.value,
+                      }))
                     }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option value="ACTIVO">ACTIVO</option>
-                    <option value="INACTIVO">INACTIVO</option>
-                    <option value="SUSPENDIDO">SUSPENDIDO</option>
-                  </select>
+                    placeholder="+56 9 1234 5678"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
                 </div>
 
-                <Input
-                  label="Teléfono"
-                  value={form.telefono || ""}
-                  onChange={(event) =>
-                    actualizarCampo("telefono", event.target.value)
-                  }
-                  placeholder="Ej: 3005550000"
-                />
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Fecha de ingreso
+                  </label>
 
-                <Input
-                  label="Fecha de ingreso"
-                  type="date"
-                  value={form.fechaIngreso}
-                  onChange={(event) =>
-                    actualizarCampo("fechaIngreso", event.target.value)
-                  }
-                />
+                  <input
+                    type="date"
+                    value={form.fechaIngreso || ""}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        fechaIngreso: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
 
-                <Input
-                  label="Salario"
-                  type="number"
-                  min="0"
-                  value={form.salario}
-                  onChange={(event) =>
-                    actualizarCampo("salario", event.target.value)
-                  }
-                  placeholder="Ej: 3000000"
-                />
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Salario
+                  </label>
 
-                {form.tipoEmpleado === "VETERINARIO" ? (
+                  <input
+                    type="number"
+                    min="0"
+                    value={form.salario ?? ""}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        salario: event.target.value,
+                      }))
+                    }
+                    placeholder="800000"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                {form.tipoEmpleado === "VETERINARIO" && (
                   <>
-                    <Input
-                      label="Especialidad"
-                      value={form.especialidad || ""}
-                      onChange={(event) =>
-                        actualizarCampo("especialidad", event.target.value)
-                      }
-                      placeholder="Ej: Medicina interna"
-                    />
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Especialidad
+                      </label>
 
-                    <Input
-                      label="Nro. matrícula"
-                      value={form.nroMatricula || ""}
-                      onChange={(event) =>
-                        actualizarCampo("nroMatricula", event.target.value)
-                      }
-                      placeholder="Ej: MAT004"
-                    />
+                      <input
+                        type="text"
+                        value={form.especialidad || ""}
+                        onChange={(event) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            especialidad: event.target.value,
+                          }))
+                        }
+                        placeholder="Ej: Medicina Interna"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Matrícula
+                      </label>
+
+                      <input
+                        type="text"
+                        value={form.nroMatricula || ""}
+                        onChange={(event) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            nroMatricula: event.target.value,
+                          }))
+                        }
+                        placeholder="VET-12345"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
                   </>
-                ) : (
+                )}
+
+                {form.tipoEmpleado === "RECEPCIONISTA" && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Turno
                     </label>
+
                     <select
                       value={form.turno || "DIURNO"}
                       onChange={(event) =>
-                        actualizarCampo(
-                          "turno",
-                          event.target.value as TurnoRecepcionista,
-                        )
+                        setForm((prev) => ({
+                          ...prev,
+                          turno: event.target.value as TurnoRecepcionista,
+                        }))
                       }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     >
                       <option value="DIURNO">DIURNO</option>
                       <option value="NOCTURNO">NOCTURNO</option>
@@ -494,154 +834,28 @@ export function Empleados() {
                 )}
               </div>
 
-              <div className="flex justify-end gap-3 pt-2">
+              <div className="mt-6 flex justify-end gap-3">
                 <Button
                   type="button"
                   variant="secondary"
-                  onClick={cerrarFormulario}
+                  onClick={limpiarFormulario}
                   disabled={saving}
                 >
                   Cancelar
                 </Button>
+
                 <Button type="submit" disabled={saving}>
-                  {saving ? "Guardando..." : "Guardar empleado"}
+                  {saving
+                    ? "Guardando..."
+                    : editando
+                      ? "Guardar cambios"
+                      : "Guardar empleado"}
                 </Button>
               </div>
             </form>
           </CardContent>
         </Card>
-      )}
-
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <CardTitle>Listado de empleados</CardTitle>
-            <div className="grid grid-cols-1 md:grid-cols-[1fr_220px] gap-3 w-full lg:w-auto">
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-3 text-gray-400" />
-                <input
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder="Buscar por nombre, ID, teléfono, especialidad..."
-                  className="w-full lg:w-80 pl-9 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-
-              <select
-                value={filterTipo}
-                onChange={(event) =>
-                  setFilterTipo(event.target.value as "TODOS" | TipoEmpleado)
-                }
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              >
-                <option value="TODOS">Todos los tipos</option>
-                <option value="VETERINARIO">Veterinarios</option>
-                <option value="RECEPCIONISTA">Recepcionistas</option>
-              </select>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="py-12 text-center text-gray-500">
-              Cargando empleados...
-            </div>
-          ) : empleadosFiltrados.length === 0 ? (
-            <div className="py-12 text-center text-gray-500">
-              No hay empleados para mostrar.
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead>Dato específico</TableHead>
-                  <TableHead>Teléfono</TableHead>
-                  <TableHead>Ingreso</TableHead>
-                  <TableHead>Salario</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead>Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {empleadosFiltrados.map((empleado) => (
-                  <TableRow key={empleado.id}>
-                    <TableCell className="font-medium">{empleado.id}</TableCell>
-                    <TableCell className="font-medium text-gray-900">
-                      {empleado.nombre}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={
-                          empleado.tipoEmpleado === "VETERINARIO"
-                            ? "info"
-                            : "purple"
-                        }
-                      >
-                        {empleado.tipoEmpleado}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-sm text-gray-600">
-                      {empleado.tipoEmpleado === "VETERINARIO" ? (
-                        <div className="space-y-1">
-                          <p>{empleado.especialidad || "Sin especialidad"}</p>
-                          {empleado.nroMatricula && (
-                            <code className="text-xs bg-gray-100 px-2 py-1 rounded">
-                              {empleado.nroMatricula}
-                            </code>
-                          )}
-                        </div>
-                      ) : (
-                        <Badge
-                          variant={
-                            empleado.turno === "NOCTURNO" ? "purple" : "warning"
-                          }
-                        >
-                          {empleado.turno || "Sin turno"}
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-gray-600">
-                      {empleado.telefono || "-"}
-                    </TableCell>
-                    <TableCell>{empleado.fechaIngreso}</TableCell>
-                    <TableCell className="font-medium text-emerald-700">
-                      ${Number(empleado.salario || 0).toLocaleString()}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={getBadgeEstado(empleado.estadoLaboral)}>
-                        {empleado.estadoLaboral}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => abrirEditar(empleado)}
-                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
-                          title="Editar"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => eliminarEmpleado(empleado)}
-                          className="p-1.5 text-red-600 hover:bg-red-50 rounded"
-                          title="Eliminar"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      </div>
     </div>
   );
 }

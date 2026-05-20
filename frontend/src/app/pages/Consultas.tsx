@@ -1,42 +1,35 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  Activity,
-  CalendarDays,
-  Edit2,
-  Plus,
-  RefreshCw,
-  Search,
-  Stethoscope,
-  Trash2,
-  X,
-} from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "../components/ui/card";
-import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../components/ui/table";
-import {
+import type {
   CatalogoConsultaCita,
   CatalogosConsultas,
+  CatalogosTratamientos,
   Consulta,
   ConsultaInput,
+  Diagnostico,
+  DiagnosticoInput,
+  EstadoDiagnostico,
+  EstadoTratamiento,
+  TipoTratamiento,
+  Tratamiento,
+  TratamientoInput,
+} from "../services/api";
+import {
   createConsulta,
-  deleteConsulta,
+  createDiagnostico,
+  createTratamiento,
   getCatalogosConsultas,
+  getCatalogosTratamientos,
   getConsultas,
-  updateConsulta,
+  getDiagnosticos,
+  getTratamientos,
 } from "../services/api";
 
 function obtenerFechaLocal() {
@@ -45,28 +38,173 @@ function obtenerFechaLocal() {
   return local.toISOString().slice(0, 10);
 }
 
-const estadoInicial: ConsultaInput = {
+const consultaInicial: ConsultaInput = {
   idCita: "",
   idServicio: "",
   temperatura: "",
   pesoConsulta: "",
+  fechaAtencionReal: obtenerFechaLocal(),
   observaciones: "",
   recomendaciones: "",
-  fechaAtencionReal: obtenerFechaLocal(),
 };
+
+const diagnosticoInicial = {
+  descripcionCondicion: "",
+  nivelGravedad: "",
+  tipoAfeccion: "",
+  estadoVisual: "EN_TRATAMIENTO",
+};
+
+const tratamientoInicial = {
+  tipo: "",
+  idServicio: "",
+  fechaInicio: obtenerFechaLocal(),
+  fechaFinEstimada: "",
+  indicaciones: "",
+};
+
+const nivelesGravedad = ["LEVE", "MODERADO", "GRAVE", "CRÍTICO"];
+
+const tiposAfeccion = [
+  "DERMATOLÓGICA",
+  "RESPIRATORIA",
+  "DIGESTIVA",
+  "TRAUMATOLÓGICA",
+  "OFTALMOLÓGICA",
+  "NEUROLÓGICA",
+  "CARDIOLÓGICA",
+];
+
+const estadosDiagnosticoVisuales = [
+  "EN_TRATAMIENTO",
+  "CONTROLADO",
+  "CURADO",
+  "EN_OBSERVACION",
+];
+
+const tiposTratamiento: TipoTratamiento[] = [
+  "MEDICACION",
+  "OBSERVACION",
+  "TERAPIA",
+  "PROCEDIMIENTO_AMBULATORIO",
+  "PLAN_VACUNACION",
+];
+
+function mapearEstadoDiagnostico(estadoVisual: string): EstadoDiagnostico {
+  if (estadoVisual === "EN_OBSERVACION") return "PRESUNTIVO";
+  if (estadoVisual === "CURADO") return "DESCARTADO";
+  return "CONFIRMADO";
+}
+
+function getBadgeClassName(valor: string) {
+  const texto = valor.toUpperCase();
+
+  if (
+    texto.includes("LEVE") ||
+    texto.includes("ACTIVO") ||
+    texto.includes("CONFIRMADO") ||
+    texto.includes("EN_TRATAMIENTO")
+  ) {
+    return "bg-emerald-100 text-emerald-700 border-emerald-300";
+  }
+
+  if (
+    texto.includes("MODERADO") ||
+    texto.includes("PRESUNTIVO") ||
+    texto.includes("OBSERVACION")
+  ) {
+    return "bg-amber-100 text-amber-700 border-amber-300";
+  }
+
+  if (
+    texto.includes("GRAVE") ||
+    texto.includes("CRÍTICO") ||
+    texto.includes("CRITICO") ||
+    texto.includes("CANCELADO") ||
+    texto.includes("SUSPENDIDO")
+  ) {
+    return "bg-red-100 text-red-700 border-red-300";
+  }
+
+  return "bg-gray-100 text-gray-700 border-gray-300";
+}
+
+function Badge({
+  children,
+  size = "md",
+}: {
+  children: React.ReactNode;
+  size?: "sm" | "md";
+}) {
+  const texto = String(children || "");
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border font-medium ${getBadgeClassName(
+        texto,
+      )} ${size === "sm" ? "px-2 py-0.5 text-xs" : "px-3 py-1 text-sm"}`}
+    >
+      {children}
+    </span>
+  );
+}
+
+function formatearVacio(valor?: string | number | null) {
+  if (valor === null || valor === undefined || valor === "") {
+    return "Sin registrar";
+  }
+
+  return String(valor);
+}
+
+function formatearCita(cita: CatalogoConsultaCita) {
+  return `Cita ${cita.id} - ${cita.mascotaNombre} (${cita.hora})`;
+}
+
+function obtenerVeterinarioId(
+  consultaForm: ConsultaInput,
+  catalogos: CatalogosConsultas,
+  consultas: Consulta[],
+) {
+  const citaCatalogo = catalogos.citasDisponibles.find(
+    (cita) => cita.id === consultaForm.idCita,
+  );
+
+  if (citaCatalogo?.veterinarioId) {
+    return citaCatalogo.veterinarioId;
+  }
+
+  const consultaExistente = consultas.find(
+    (consulta) => consulta.idCita === consultaForm.idCita,
+  );
+
+  return consultaExistente?.veterinarioId || "";
+}
 
 export function Consultas() {
   const [consultas, setConsultas] = useState<Consulta[]>([]);
-  const [catalogos, setCatalogos] = useState<CatalogosConsultas>({
-    citasDisponibles: [],
-    servicios: [],
-  });
+  const [diagnosticos, setDiagnosticos] = useState<Diagnostico[]>([]);
+  const [tratamientos, setTratamientos] = useState<Tratamiento[]>([]);
 
-  const [form, setForm] = useState<ConsultaInput>(estadoInicial);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
+  const [catalogosConsultas, setCatalogosConsultas] =
+    useState<CatalogosConsultas>({
+      citasDisponibles: [],
+      servicios: [],
+    });
 
-  const [searchTerm, setSearchTerm] = useState("");
+  const [catalogosTratamientos, setCatalogosTratamientos] =
+    useState<CatalogosTratamientos>({
+      diagnosticos: [],
+      veterinarios: [],
+      servicios: [],
+      medicamentos: [],
+    });
+
+  const [consultaForm, setConsultaForm] =
+    useState<ConsultaInput>(consultaInicial);
+  const [diagnosticoForm, setDiagnosticoForm] = useState(diagnosticoInicial);
+  const [tratamientoForm, setTratamientoForm] = useState(tratamientoInicial);
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -76,18 +214,46 @@ export function Consultas() {
       setLoading(true);
       setError("");
 
-      const [consultasData, catalogosData] = await Promise.all([
+      const [
+        consultasData,
+        catalogosConsultasData,
+        diagnosticosData,
+        tratamientosData,
+        catalogosTratamientosData,
+      ] = await Promise.all([
         getConsultas(),
         getCatalogosConsultas(),
+        getDiagnosticos(),
+        getTratamientos(),
+        getCatalogosTratamientos(),
       ]);
 
       setConsultas(consultasData);
-      setCatalogos(catalogosData);
+      setCatalogosConsultas(catalogosConsultasData);
+      setDiagnosticos(diagnosticosData);
+      setTratamientos(tratamientosData);
+      setCatalogosTratamientos(catalogosTratamientosData);
+
+      if (!consultaForm.idCita && catalogosConsultasData.citasDisponibles[0]) {
+        const primeraCita = catalogosConsultasData.citasDisponibles[0];
+
+        setConsultaForm((actual) => ({
+          ...actual,
+          idCita: primeraCita.id,
+        }));
+      }
+
+      if (!consultaForm.idServicio && catalogosConsultasData.servicios[0]) {
+        const primerServicio = catalogosConsultasData.servicios[0];
+
+        setConsultaForm((actual) => ({
+          ...actual,
+          idServicio: primerServicio.id,
+        }));
+      }
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "Error cargando consultas veterinarias",
+        err instanceof Error ? err.message : "Error cargando consultas médicas",
       );
     } finally {
       setLoading(false);
@@ -98,152 +264,89 @@ export function Consultas() {
     cargarDatos();
   }, []);
 
-  const consultaEditando = useMemo(() => {
-    if (!editingId) return null;
-    return consultas.find((consulta) => consulta.id === editingId) || null;
-  }, [editingId, consultas]);
+  const historial = useMemo(() => {
+    return consultas
+      .slice()
+      .sort(
+        (a, b) =>
+          new Date(b.fechaAtencionReal).getTime() -
+          new Date(a.fechaAtencionReal).getTime(),
+      )
+      .slice(0, 6)
+      .map((consulta) => {
+        const diagnostico = diagnosticos.find(
+          (item) => item.idConsulta === consulta.id,
+        );
 
-  const citasParaSelect = useMemo(() => {
-    const citas = [...catalogos.citasDisponibles];
+        const tratamiento = diagnostico
+          ? tratamientos.find(
+              (item) =>
+                item.idDiagnostico === diagnostico.id &&
+                item.estado === "ACTIVO",
+            )
+          : null;
 
-    if (consultaEditando) {
-      const yaExiste = citas.some(
-        (cita) => cita.id === consultaEditando.idCita,
-      );
-
-      if (!yaExiste) {
-        const citaActual: CatalogoConsultaCita = {
-          id: consultaEditando.idCita,
-          fecha: consultaEditando.citaFecha,
-          hora: consultaEditando.citaHora,
-          motivo: consultaEditando.motivo,
-          estado: consultaEditando.citaEstado,
-          mascotaId: consultaEditando.mascotaId,
-          mascotaNombre: consultaEditando.mascotaNombre,
-          mascotaEspecie: consultaEditando.mascotaEspecie,
-          clienteId: consultaEditando.clienteId,
-          clienteNombre: consultaEditando.clienteNombre,
-          clienteTelefono: consultaEditando.clienteTelefono,
-          veterinarioId: consultaEditando.veterinarioId,
-          veterinarioNombre: consultaEditando.veterinarioNombre,
+        return {
+          consulta,
+          diagnostico,
+          tratamiento,
         };
+      });
+  }, [consultas, diagnosticos, tratamientos]);
 
-        citas.unshift(citaActual);
-      }
-    }
+  const citaSeleccionada = useMemo(
+    () =>
+      catalogosConsultas.citasDisponibles.find(
+        (cita) => cita.id === consultaForm.idCita,
+      ) || null,
+    [catalogosConsultas.citasDisponibles, consultaForm.idCita],
+  );
 
-    return citas;
-  }, [catalogos.citasDisponibles, consultaEditando]);
-
-  const consultasFiltradas = useMemo(() => {
-    const termino = searchTerm.toLowerCase().trim();
-
-    if (!termino) {
-      return consultas;
-    }
-
-    return consultas.filter((consulta) => {
-      return [
-        consulta.id,
-        consulta.idCita,
-        consulta.mascotaNombre,
-        consulta.clienteNombre,
-        consulta.veterinarioNombre,
-        consulta.servicioNombre,
-        consulta.observaciones,
-        consulta.recomendaciones,
-      ]
-        .filter(Boolean)
-        .some((valor) => String(valor).toLowerCase().includes(termino));
+  const limpiarFormulario = () => {
+    setConsultaForm({
+      ...consultaInicial,
+      fechaAtencionReal: obtenerFechaLocal(),
+      idCita: catalogosConsultas.citasDisponibles[0]?.id || "",
+      idServicio: catalogosConsultas.servicios[0]?.id || "",
     });
-  }, [consultas, searchTerm]);
+    setDiagnosticoForm(diagnosticoInicial);
+    setTratamientoForm({
+      ...tratamientoInicial,
+      fechaInicio: obtenerFechaLocal(),
+    });
+    setError("");
+  };
 
-  const estadisticas = useMemo(() => {
-    const hoy = obtenerFechaLocal();
-
-    return {
-      total: consultas.length,
-      hoy: consultas.filter((consulta) => consulta.fechaAtencionReal === hoy)
-        .length,
-      conTemperatura: consultas.filter(
-        (consulta) =>
-          consulta.temperatura !== null && consulta.temperatura !== undefined,
-      ).length,
-      citasDisponibles: catalogos.citasDisponibles.length,
-    };
-  }, [consultas, catalogos.citasDisponibles.length]);
-
-  const actualizarCampo = (campo: keyof ConsultaInput, valor: string) => {
-    setForm((actual) => ({
+  const actualizarConsultaCampo = (
+    campo: keyof ConsultaInput,
+    valor: string,
+  ) => {
+    setConsultaForm((actual) => ({
       ...actual,
       [campo]: valor,
     }));
   };
 
-  const limpiarFormulario = () => {
-    setForm(estadoInicial);
-    setEditingId(null);
-    setShowForm(false);
-    setError("");
-  };
-
-  const nuevaConsulta = () => {
-    setForm(estadoInicial);
-    setEditingId(null);
-    setShowForm(true);
-    setError("");
-  };
-
-  const editarConsulta = (consulta: Consulta) => {
-    setForm({
-      idCita: consulta.idCita,
-      idServicio: consulta.idServicio,
-      temperatura: consulta.temperatura ?? "",
-      pesoConsulta: consulta.pesoConsulta ?? "",
-      observaciones: consulta.observaciones ?? "",
-      recomendaciones: consulta.recomendaciones ?? "",
-      fechaAtencionReal: consulta.fechaAtencionReal,
-    });
-
-    setEditingId(consulta.id);
-    setShowForm(true);
-    setError("");
-
-    window.scrollTo({
-      top: 0,
-      behavior: "smooth",
-    });
-  };
-
-  const prepararPayload = (): ConsultaInput => ({
-    ...form,
-    temperatura:
-      form.temperatura === "" || form.temperatura === null
-        ? null
-        : Number(form.temperatura),
-    pesoConsulta:
-      form.pesoConsulta === "" || form.pesoConsulta === null
-        ? null
-        : Number(form.pesoConsulta),
-    observaciones: form.observaciones?.trim() || null,
-    recomendaciones: form.recomendaciones?.trim() || null,
-  });
-
   const guardarConsulta = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!form.idCita) {
-      setError("Selecciona una cita.");
+    if (!consultaForm.idCita) {
+      setError("Selecciona una cita para registrar la consulta.");
       return;
     }
 
-    if (!form.idServicio) {
-      setError("Selecciona un servicio.");
+    if (!consultaForm.idServicio) {
+      setError("Selecciona el servicio de la consulta.");
       return;
     }
 
-    if (!form.fechaAtencionReal) {
-      setError("Selecciona la fecha de atención real.");
+    if (!consultaForm.fechaAtencionReal) {
+      setError("La fecha de atención es obligatoria.");
+      return;
+    }
+
+    if (!diagnosticoForm.descripcionCondicion.trim()) {
+      setError("La descripción del diagnóstico es obligatoria.");
       return;
     }
 
@@ -251,70 +354,84 @@ export function Consultas() {
       setSaving(true);
       setError("");
 
-      const payload = prepararPayload();
+      const consultaPayload: ConsultaInput = {
+        idCita: consultaForm.idCita,
+        idServicio: consultaForm.idServicio,
+        temperatura: consultaForm.temperatura || null,
+        pesoConsulta: consultaForm.pesoConsulta || null,
+        fechaAtencionReal: consultaForm.fechaAtencionReal,
+        observaciones: consultaForm.observaciones?.trim() || null,
+        recomendaciones: consultaForm.recomendaciones?.trim() || null,
+      };
 
-      if (editingId) {
-        await updateConsulta(editingId, payload);
-      } else {
-        await createConsulta(payload);
+      const consultaCreada = await createConsulta(consultaPayload);
+
+      const diagnosticoPayload: DiagnosticoInput = {
+        idConsulta: consultaCreada.id,
+        descripcionCondicion: diagnosticoForm.descripcionCondicion.trim(),
+        nivelGravedad: diagnosticoForm.nivelGravedad || null,
+        tipoAfeccion: diagnosticoForm.tipoAfeccion || null,
+        estado: mapearEstadoDiagnostico(diagnosticoForm.estadoVisual),
+      };
+
+      const diagnosticoCreado = await createDiagnostico(diagnosticoPayload);
+
+      if (tratamientoForm.tipo) {
+        const veterinarioId = obtenerVeterinarioId(
+          consultaForm,
+          catalogosConsultas,
+          consultas,
+        );
+
+        if (!veterinarioId) {
+          throw new Error(
+            "No se pudo obtener el veterinario de la cita para crear el tratamiento.",
+          );
+        }
+
+        const tratamientoPayload: TratamientoInput = {
+          idDiagnostico: diagnosticoCreado.id,
+          idVeterinario: veterinarioId,
+          idServicio: tratamientoForm.idServicio || null,
+          tipo: tratamientoForm.tipo as TipoTratamiento,
+          fechaInicio: tratamientoForm.fechaInicio,
+          fechaFinEstimada: tratamientoForm.fechaFinEstimada || null,
+          indicaciones: tratamientoForm.indicaciones?.trim() || null,
+          estado: "ACTIVO" as EstadoTratamiento,
+        };
+
+        await createTratamiento(tratamientoPayload);
       }
 
-      limpiarFormulario();
       await cargarDatos();
+      limpiarFormulario();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Error guardando la consulta",
-      );
+      setError(err instanceof Error ? err.message : "Error guardando consulta");
     } finally {
       setSaving(false);
     }
   };
 
-  const eliminarConsulta = async (consulta: Consulta) => {
-    const confirmar = window.confirm(
-      `¿Seguro que deseas eliminar la consulta ${consulta.id} de ${consulta.mascotaNombre}?`,
-    );
-
-    if (!confirmar) return;
-
-    try {
-      setError("");
-      await deleteConsulta(consulta.id);
-      await cargarDatos();
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Error eliminando la consulta",
-      );
-    }
-  };
-
-  const citaSeleccionada = citasParaSelect.find(
-    (cita) => cita.id === form.idCita,
-  );
-
-  const servicioSeleccionado = catalogos.servicios.find(
-    (servicio) => servicio.id === form.idServicio,
-  );
-
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      {/* Page Header */}
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">
             Consultas médicas
           </h1>
           <p className="text-gray-500 mt-1">
-            Registra las atenciones veterinarias conectadas a citas reales.
+            Registra las atenciones veterinarias
           </p>
         </div>
 
         <div className="flex gap-2">
-          <Button type="button" variant="secondary" onClick={cargarDatos}>
+          <Button variant="secondary" onClick={cargarDatos} disabled={loading}>
             <RefreshCw className="w-4 h-4 mr-2" />
             Actualizar
           </Button>
 
-          <Button type="button" onClick={nuevaConsulta}>
+          <Button onClick={limpiarFormulario}>
             <Plus className="w-4 h-4 mr-2" />
             Nueva consulta
           </Button>
@@ -327,115 +444,44 @@ export function Consultas() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
-                <Stethoscope className="w-5 h-5 text-emerald-600" />
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Consultas</p>
-                <p className="text-xl font-bold text-gray-900">
-                  {estadisticas.total}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      {loading ? (
+        <div className="py-10 text-center text-gray-500">
+          Cargando consultas médicas...
+        </div>
+      ) : (
+        <form onSubmit={guardarConsulta} className="space-y-6">
+          {/* Formulario de Consulta */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Registrar consulta veterinaria</CardTitle>
+            </CardHeader>
 
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                <CalendarDays className="w-5 h-5 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Hoy</p>
-                <p className="text-xl font-bold text-gray-900">
-                  {estadisticas.hoy}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
-                <Activity className="w-5 h-5 text-orange-600" />
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Con temperatura</p>
-                <p className="text-xl font-bold text-gray-900">
-                  {estadisticas.conTemperatura}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                <Plus className="w-5 h-5 text-purple-600" />
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Citas disponibles</p>
-                <p className="text-xl font-bold text-gray-900">
-                  {estadisticas.citasDisponibles}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {showForm && (
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>
-                {editingId
-                  ? "Editar consulta veterinaria"
-                  : "Registrar consulta veterinaria"}
-              </CardTitle>
-
-              <Button type="button" variant="ghost" onClick={limpiarFormulario}>
-                <X className="w-4 h-4" />
-              </Button>
-            </div>
-          </CardHeader>
-
-          <CardContent>
-            <form onSubmit={guardarConsulta} className="space-y-5">
+            <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Cita
                   </label>
+
                   <select
-                    value={form.idCita}
+                    value={consultaForm.idCita}
                     onChange={(event) =>
-                      actualizarCampo("idCita", event.target.value)
+                      actualizarConsultaCampo("idCita", event.target.value)
                     }
                     className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    required
                   >
                     <option value="">Seleccionar cita...</option>
-                    {citasParaSelect.map((cita) => (
+
+                    {catalogosConsultas.citasDisponibles.map((cita) => (
                       <option key={cita.id} value={cita.id}>
-                        {cita.id} - {cita.mascotaNombre} / {cita.clienteNombre}{" "}
-                        - {cita.fecha} {cita.hora}
+                        {formatearCita(cita)}
                       </option>
                     ))}
                   </select>
 
-                  {citasParaSelect.length === 0 && !editingId && (
-                    <p className="text-xs text-orange-600 mt-1">
-                      No hay citas disponibles sin consulta.
+                  {catalogosConsultas.citasDisponibles.length === 0 && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      No hay citas disponibles para registrar consulta.
                     </p>
                   )}
                 </div>
@@ -444,19 +490,19 @@ export function Consultas() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Servicio
                   </label>
+
                   <select
-                    value={form.idServicio}
+                    value={consultaForm.idServicio}
                     onChange={(event) =>
-                      actualizarCampo("idServicio", event.target.value)
+                      actualizarConsultaCampo("idServicio", event.target.value)
                     }
                     className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    required
                   >
                     <option value="">Seleccionar servicio...</option>
-                    {catalogos.servicios.map((servicio) => (
+
+                    {catalogosConsultas.servicios.map((servicio) => (
                       <option key={servicio.id} value={servicio.id}>
-                        {servicio.nombre} - {servicio.tipoServicio} - $
-                        {Number(servicio.precio || 0).toLocaleString()}
+                        {servicio.nombre}
                       </option>
                     ))}
                   </select>
@@ -464,100 +510,94 @@ export function Consultas() {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Temperatura °C
+                    Temperatura (°C)
                   </label>
-                  <Input
+
+                  <input
                     type="number"
                     step="0.1"
-                    min="0"
+                    value={consultaForm.temperatura ?? ""}
+                    onChange={(event) =>
+                      actualizarConsultaCampo("temperatura", event.target.value)
+                    }
                     placeholder="38.5"
-                    value={form.temperatura ?? ""}
-                    onChange={(event) =>
-                      actualizarCampo("temperatura", event.target.value)
-                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Peso en consulta kg
+                    Peso en consulta (kg)
                   </label>
-                  <Input
+
+                  <input
                     type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="12.50"
-                    value={form.pesoConsulta ?? ""}
+                    step="0.1"
+                    value={consultaForm.pesoConsulta ?? ""}
                     onChange={(event) =>
-                      actualizarCampo("pesoConsulta", event.target.value)
+                      actualizarConsultaCampo(
+                        "pesoConsulta",
+                        event.target.value,
+                      )
                     }
+                    placeholder="12.5"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Fecha de atención real
+                    Fecha de atención
                   </label>
-                  <Input
+
+                  <input
                     type="date"
-                    value={form.fechaAtencionReal}
+                    value={consultaForm.fechaAtencionReal}
                     onChange={(event) =>
-                      actualizarCampo("fechaAtencionReal", event.target.value)
+                      actualizarConsultaCampo(
+                        "fechaAtencionReal",
+                        event.target.value,
+                      )
                     }
-                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
 
-                <div className="flex items-end">
-                  {servicioSeleccionado && (
-                    <div className="w-full rounded-lg bg-gray-50 border px-3 py-2">
-                      <p className="text-xs text-gray-500">
-                        Servicio seleccionado
+                {citaSeleccionada && (
+                  <div className="flex items-end">
+                    <div className="w-full rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-600">
+                      <p>
+                        <span className="font-medium text-gray-900">
+                          Mascota:
+                        </span>{" "}
+                        {citaSeleccionada.mascotaNombre}
                       </p>
-                      <p className="text-sm font-medium text-gray-900">
-                        {servicioSeleccionado.nombre}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        $
-                        {Number(
-                          servicioSeleccionado.precio || 0,
-                        ).toLocaleString()}
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="md:col-span-2">
-                  {citaSeleccionada && (
-                    <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-4 py-3">
-                      <p className="text-sm font-medium text-emerald-900">
-                        {citaSeleccionada.mascotaNombre} ·{" "}
-                        {citaSeleccionada.mascotaEspecie}
-                      </p>
-                      <p className="text-sm text-emerald-700">
-                        Cliente: {citaSeleccionada.clienteNombre} | Veterinario:{" "}
+                      <p>
+                        <span className="font-medium text-gray-900">
+                          Veterinario:
+                        </span>{" "}
                         {citaSeleccionada.veterinarioNombre}
                       </p>
-                      <p className="text-sm text-emerald-700">
-                        Motivo:{" "}
-                        {citaSeleccionada.motivo || "Sin motivo registrado"}
-                      </p>
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
 
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Observaciones
                   </label>
+
                   <textarea
-                    value={form.observaciones ?? ""}
+                    value={consultaForm.observaciones || ""}
                     onChange={(event) =>
-                      actualizarCampo("observaciones", event.target.value)
+                      actualizarConsultaCampo(
+                        "observaciones",
+                        event.target.value,
+                      )
                     }
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     rows={3}
-                    placeholder="Describe los hallazgos de la consulta..."
+                    placeholder="Descripción detallada de la consulta..."
                   />
                 </div>
 
@@ -565,19 +605,238 @@ export function Consultas() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Recomendaciones
                   </label>
+
                   <textarea
-                    value={form.recomendaciones ?? ""}
+                    value={consultaForm.recomendaciones || ""}
                     onChange={(event) =>
-                      actualizarCampo("recomendaciones", event.target.value)
+                      actualizarConsultaCampo(
+                        "recomendaciones",
+                        event.target.value,
+                      )
                     }
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     rows={3}
-                    placeholder="Recomendaciones para el tutor de la mascota..."
+                    placeholder="Recomendaciones para el dueño..."
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Sección de Diagnóstico */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Diagnóstico</CardTitle>
+            </CardHeader>
+
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Descripción del diagnóstico
+                  </label>
+
+                  <textarea
+                    value={diagnosticoForm.descripcionCondicion}
+                    onChange={(event) =>
+                      setDiagnosticoForm((actual) => ({
+                        ...actual,
+                        descripcionCondicion: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    rows={3}
+                    placeholder="Descripción detallada del diagnóstico..."
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Nivel de gravedad
+                  </label>
+
+                  <select
+                    value={diagnosticoForm.nivelGravedad}
+                    onChange={(event) =>
+                      setDiagnosticoForm((actual) => ({
+                        ...actual,
+                        nivelGravedad: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="">Seleccionar...</option>
+                    {nivelesGravedad.map((nivel) => (
+                      <option key={nivel} value={nivel}>
+                        {nivel}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Tipo de afección
+                  </label>
+
+                  <select
+                    value={diagnosticoForm.tipoAfeccion}
+                    onChange={(event) =>
+                      setDiagnosticoForm((actual) => ({
+                        ...actual,
+                        tipoAfeccion: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="">Seleccionar...</option>
+                    {tiposAfeccion.map((tipo) => (
+                      <option key={tipo} value={tipo}>
+                        {tipo}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Estado del diagnóstico
+                  </label>
+
+                  <select
+                    value={diagnosticoForm.estadoVisual}
+                    onChange={(event) =>
+                      setDiagnosticoForm((actual) => ({
+                        ...actual,
+                        estadoVisual: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    {estadosDiagnosticoVisuales.map((estado) => (
+                      <option key={estado} value={estado}>
+                        {estado}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Tratamiento Recomendado */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Tratamiento recomendado</CardTitle>
+            </CardHeader>
+
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Tipo de tratamiento
+                  </label>
+
+                  <select
+                    value={tratamientoForm.tipo}
+                    onChange={(event) =>
+                      setTratamientoForm((actual) => ({
+                        ...actual,
+                        tipo: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="">Seleccionar...</option>
+                    {tiposTratamiento.map((tipo) => (
+                      <option key={tipo} value={tipo}>
+                        {tipo}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Servicio asociado (opcional)
+                  </label>
+
+                  <select
+                    value={tratamientoForm.idServicio}
+                    onChange={(event) =>
+                      setTratamientoForm((actual) => ({
+                        ...actual,
+                        idServicio: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="">Ninguno</option>
+                    {catalogosTratamientos.servicios.map((servicio) => (
+                      <option key={servicio.id} value={servicio.id}>
+                        {servicio.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Fecha inicio
+                  </label>
+
+                  <input
+                    type="date"
+                    value={tratamientoForm.fechaInicio}
+                    onChange={(event) =>
+                      setTratamientoForm((actual) => ({
+                        ...actual,
+                        fechaInicio: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Fecha fin estimada
+                  </label>
+
+                  <input
+                    type="date"
+                    value={tratamientoForm.fechaFinEstimada}
+                    onChange={(event) =>
+                      setTratamientoForm((actual) => ({
+                        ...actual,
+                        fechaFinEstimada: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Indicaciones del tratamiento
+                  </label>
+
+                  <textarea
+                    value={tratamientoForm.indicaciones}
+                    onChange={(event) =>
+                      setTratamientoForm((actual) => ({
+                        ...actual,
+                        indicaciones: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    rows={3}
+                    placeholder="Instrucciones detalladas del tratamiento..."
                   />
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3">
+              <div className="mt-6 flex justify-end gap-3">
                 <Button
                   type="button"
                   variant="secondary"
@@ -588,147 +847,89 @@ export function Consultas() {
                 </Button>
 
                 <Button type="submit" disabled={saving}>
-                  {saving
-                    ? "Guardando..."
-                    : editingId
-                      ? "Actualizar consulta"
-                      : "Guardar consulta"}
+                  {saving ? "Guardando..." : "Guardar consulta"}
                 </Button>
               </div>
-            </form>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </form>
       )}
 
+      {/* Historial de Consultas */}
       <Card>
         <CardHeader>
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <CardTitle>Historial de consultas</CardTitle>
-
-            <div className="relative w-full md:w-80">
-              <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
-              <Input
-                placeholder="Buscar consulta..."
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-                className="pl-9"
-              />
-            </div>
-          </div>
+          <CardTitle>Historial de consultas recientes</CardTitle>
         </CardHeader>
 
         <CardContent>
-          {loading ? (
+          {historial.length === 0 ? (
             <div className="py-8 text-center text-gray-500">
-              Cargando consultas...
-            </div>
-          ) : consultasFiltradas.length === 0 ? (
-            <div className="py-8 text-center text-gray-500">
-              No hay consultas registradas.
+              No hay consultas recientes.
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Consulta</TableHead>
-                  <TableHead>Mascota / Cliente</TableHead>
-                  <TableHead>Veterinario</TableHead>
-                  <TableHead>Servicio</TableHead>
-                  <TableHead>Fecha</TableHead>
-                  <TableHead>Signos</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
+            <div className="space-y-3">
+              {historial.map(({ consulta, diagnostico, tratamiento }) => (
+                <div
+                  key={consulta.id}
+                  className="p-4 border border-gray-200 rounded-lg"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex flex-wrap items-center gap-3 mb-2">
+                        <h4 className="font-semibold text-gray-900">
+                          {diagnostico?.descripcionCondicion ||
+                            consulta.servicioNombre}
+                        </h4>
 
-              <TableBody>
-                {consultasFiltradas.map((consulta) => (
-                  <TableRow key={consulta.id}>
-                    <TableCell>
-                      <div>
-                        <p className="font-medium text-gray-900">
-                          {consulta.id}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          Cita: {consulta.idCita}
-                        </p>
+                        {diagnostico?.nivelGravedad && (
+                          <Badge>{diagnostico.nivelGravedad}</Badge>
+                        )}
+
+                        {diagnostico?.estado && (
+                          <Badge>{diagnostico.estado}</Badge>
+                        )}
+
+                        {tratamiento?.estado && (
+                          <Badge>{tratamiento.estado}</Badge>
+                        )}
                       </div>
-                    </TableCell>
 
-                    <TableCell>
-                      <div>
-                        <p className="font-medium text-gray-900">
+                      <p className="text-sm text-gray-600 mb-2">
+                        Mascota:{" "}
+                        <span className="font-medium">
                           {consulta.mascotaNombre}
+                        </span>{" "}
+                        | Veterinario:{" "}
+                        <span className="font-medium">
+                          {consulta.veterinarioNombre}
+                        </span>
+                      </p>
+
+                      <p className="text-sm text-gray-500">
+                        Fecha: {consulta.fechaAtencionReal} | Servicio:{" "}
+                        {consulta.servicioNombre}
+                      </p>
+
+                      <p className="text-sm text-gray-600 mt-2">
+                        Observaciones: {formatearVacio(consulta.observaciones)}
+                      </p>
+
+                      {consulta.recomendaciones && (
+                        <p className="text-sm text-gray-600 mt-1">
+                          Recomendaciones: {consulta.recomendaciones}
                         </p>
-                        <p className="text-xs text-gray-500">
-                          {consulta.mascotaEspecie} · {consulta.clienteNombre}
+                      )}
+
+                      {tratamiento?.indicaciones && (
+                        <p className="text-sm text-gray-600 mt-1">
+                          Tratamiento: {tratamiento.indicaciones}
                         </p>
-                      </div>
-                    </TableCell>
-
-                    <TableCell>{consulta.veterinarioNombre}</TableCell>
-
-                    <TableCell>
-                      <div className="space-y-1">
-                        <p className="text-sm">{consulta.servicioNombre}</p>
-                        <Badge className="bg-blue-50 text-blue-700 border-blue-100">
-                          {consulta.servicioTipo}
-                        </Badge>
-                      </div>
-                    </TableCell>
-
-                    <TableCell>
-                      <div>
-                        <p className="text-sm">{consulta.fechaAtencionReal}</p>
-                        <p className="text-xs text-gray-500">
-                          {consulta.citaHora}
-                        </p>
-                      </div>
-                    </TableCell>
-
-                    <TableCell>
-                      <div className="text-sm text-gray-600">
-                        <p>
-                          Temp:{" "}
-                          {consulta.temperatura !== null &&
-                          consulta.temperatura !== undefined
-                            ? `${consulta.temperatura} °C`
-                            : "-"}
-                        </p>
-                        <p>
-                          Peso:{" "}
-                          {consulta.pesoConsulta !== null &&
-                          consulta.pesoConsulta !== undefined
-                            ? `${consulta.pesoConsulta} kg`
-                            : "-"}
-                        </p>
-                      </div>
-                    </TableCell>
-
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => editarConsulta(consulta)}
-                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
-                          title="Editar"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => eliminarConsulta(consulta)}
-                          className="p-1.5 text-red-600 hover:bg-red-50 rounded"
-                          title="Eliminar"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </CardContent>
       </Card>

@@ -1,37 +1,23 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "../components/ui/card";
-import { Badge } from "../components/ui/badge";
-import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../components/ui/table";
-import {
-  Search,
-  Plus,
   Edit2,
+  Mail,
+  MapPin,
+  Phone,
+  Plus,
+  Search,
   Trash2,
   X,
-  Mail,
-  Phone,
-  MapPin,
-  RefreshCw,
 } from "lucide-react";
-import {
+import { Card, CardContent } from "../components/ui/card";
+import { Button } from "../components/ui/button";
+import type {
   Cliente,
   ClienteInput,
   EstadoCliente,
   Mascota,
+} from "../services/api";
+import {
   createCliente,
   deleteCliente,
   getClientes,
@@ -39,7 +25,7 @@ import {
   updateCliente,
 } from "../services/api";
 
-type BadgeVariant = "success" | "warning" | "danger" | "default";
+type FiltroEstado = "TODOS" | EstadoCliente;
 
 const estadoInicial: ClienteInput = {
   id: "",
@@ -50,24 +36,60 @@ const estadoInicial: ClienteInput = {
   estado: "ACTIVO",
 };
 
+function getEstadoClassName(estado: string) {
+  switch (estado) {
+    case "ACTIVO":
+      return "bg-emerald-100 text-emerald-700 border-emerald-300";
+    case "INACTIVO":
+      return "bg-amber-100 text-amber-700 border-amber-300";
+    case "SUSPENDIDO":
+      return "bg-red-100 text-red-700 border-red-300";
+    case "Saludable":
+    case "SALUDABLE":
+      return "bg-blue-100 text-blue-700 border-blue-300";
+    default:
+      return "bg-gray-100 text-gray-700 border-gray-300";
+  }
+}
+
+function EstadoBadge({
+  estado,
+  size = "md",
+}: {
+  estado: string;
+  size?: "sm" | "md";
+}) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border font-medium ${getEstadoClassName(
+        estado,
+      )} ${size === "sm" ? "px-2 py-0.5 text-xs" : "px-3 py-1 text-sm"}`}
+    >
+      {estado}
+    </span>
+  );
+}
+
+function formatearVacio(valor?: string | null) {
+  return valor?.trim() ? valor : "Sin registrar";
+}
+
 export function Clientes() {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [mascotas, setMascotas] = useState<Mascota[]>([]);
   const [selectedClienteId, setSelectedClienteId] = useState<string | null>(
     null,
   );
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
-  const [filterEstado, setFilterEstado] = useState<"TODOS" | EstadoCliente>(
-    "TODOS",
-  );
-  const [form, setForm] = useState<ClienteInput>(estadoInicial);
-  const [showForm, setShowForm] = useState(false);
+  const [filterEstado, setFilterEstado] = useState<FiltroEstado>("TODOS");
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
+  const [modalAbierto, setModalAbierto] = useState(false);
+  const [editando, setEditando] = useState<Cliente | null>(null);
+  const [form, setForm] = useState<ClienteInput>(estadoInicial);
 
-  const cargarClientes = async () => {
+  const cargarDatos = async () => {
     try {
       setLoading(true);
       setError("");
@@ -80,29 +102,24 @@ export function Clientes() {
       setClientes(clientesData);
       setMascotas(mascotasData);
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "No se pudieron cargar los clientes.",
-      );
+      setError(err instanceof Error ? err.message : "Error cargando clientes");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    cargarClientes();
+    cargarDatos();
   }, []);
 
-  const filteredClientes = useMemo(() => {
-    const search = searchTerm.toLowerCase().trim();
+  const clientesFiltrados = useMemo(() => {
+    const busqueda = searchTerm.trim().toLowerCase();
 
     return clientes.filter((cliente) => {
       const matchesSearch =
-        cliente.id.toLowerCase().includes(search) ||
-        cliente.nombre.toLowerCase().includes(search) ||
-        (cliente.email || "").toLowerCase().includes(search) ||
-        (cliente.telefono || "").toLowerCase().includes(search);
+        cliente.nombre.toLowerCase().includes(busqueda) ||
+        (cliente.email || "").toLowerCase().includes(busqueda) ||
+        (cliente.telefono || "").toLowerCase().includes(busqueda);
 
       const matchesEstado =
         filterEstado === "TODOS" || cliente.estado === filterEstado;
@@ -111,129 +128,115 @@ export function Clientes() {
     });
   }, [clientes, searchTerm, filterEstado]);
 
-  const clienteSeleccionado = selectedClienteId
-    ? clientes.find((cliente) => cliente.id === selectedClienteId)
-    : null;
+  const selectedCliente = useMemo(
+    () =>
+      selectedClienteId
+        ? clientes.find((cliente) => cliente.id === selectedClienteId) || null
+        : null,
+    [clientes, selectedClienteId],
+  );
 
-  const mascotasCliente = selectedClienteId
-    ? mascotas.filter((mascota) => mascota.clienteId === selectedClienteId)
-    : [];
+  const mascotasCliente = useMemo(() => {
+    if (!selectedCliente) return [];
 
-  const getBadgeVariant = (estado: string): BadgeVariant => {
-    switch (estado) {
-      case "ACTIVO":
-        return "success";
-      case "INACTIVO":
-        return "warning";
-      case "SUSPENDIDO":
-        return "danger";
-      default:
-        return "default";
-    }
-  };
+    return mascotas.filter(
+      (mascota) => mascota.clienteId === selectedCliente.id,
+    );
+  }, [mascotas, selectedCliente]);
 
-  const abrirNuevo = () => {
-    setEditingId(null);
+  const abrirCrear = () => {
+    setEditando(null);
     setForm(estadoInicial);
-    setShowForm(true);
-    setError("");
+    setModalAbierto(true);
   };
 
-  const abrirEdicion = (cliente: Cliente) => {
-    setEditingId(cliente.id);
+  const abrirEditar = (cliente: Cliente) => {
+    setEditando(cliente);
     setForm({
       id: cliente.id,
-      nombre: cliente.nombre,
+      nombre: cliente.nombre || "",
       direccion: cliente.direccion || "",
       email: cliente.email || "",
       telefono: cliente.telefono || "",
       estado: cliente.estado,
     });
-    setShowForm(true);
-    setError("");
+    setModalAbierto(true);
   };
 
-  const cerrarFormulario = () => {
-    setEditingId(null);
+  const cerrarModal = () => {
+    setModalAbierto(false);
+    setEditando(null);
     setForm(estadoInicial);
-    setShowForm(false);
-    setError("");
   };
 
-  const handleChange = (field: keyof ClienteInput, value: string) => {
-    setForm((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-  };
+  const guardarCliente = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
 
-  const guardarCliente = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-
-    if (!editingId && !form.id?.trim()) {
-      setError("El ID del cliente es obligatorio. Ejemplo: CLI006");
-      return;
-    }
-
-    if (!form.nombre.trim()) {
+    if (!form.nombre?.trim()) {
       setError("El nombre del cliente es obligatorio.");
       return;
     }
 
+    if (!editando && !form.id?.trim()) {
+      setError("El ID del cliente es obligatorio.");
+      return;
+    }
+
     try {
-      setSaving(true);
+      setGuardando(true);
       setError("");
 
       const payload: ClienteInput = {
         id: form.id?.trim(),
         nombre: form.nombre.trim(),
-        direccion: form.direccion || null,
-        email: form.email || null,
-        telefono: form.telefono || null,
+        direccion: form.direccion?.trim() || null,
+        email: form.email?.trim() || null,
+        telefono: form.telefono?.trim() || null,
         estado: form.estado,
       };
 
-      if (editingId) {
-        await updateCliente(editingId, payload);
+      if (editando) {
+        await updateCliente(editando.id, {
+          ...payload,
+          id: editando.id,
+        });
       } else {
         await createCliente(payload);
       }
 
-      await cargarClientes();
-      cerrarFormulario();
+      await cargarDatos();
+      cerrarModal();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "No se pudo guardar el cliente.",
-      );
+      setError(err instanceof Error ? err.message : "Error guardando cliente");
     } finally {
-      setSaving(false);
+      setGuardando(false);
     }
   };
 
   const eliminarCliente = async (cliente: Cliente) => {
-    const confirmar = window.confirm(
+    const confirmado = window.confirm(
       `¿Seguro que deseas eliminar a ${cliente.nombre}?`,
     );
 
-    if (!confirmar) return;
+    if (!confirmado) return;
 
     try {
       setError("");
       await deleteCliente(cliente.id);
-      await cargarClientes();
 
       if (selectedClienteId === cliente.id) {
         setSelectedClienteId(null);
       }
+
+      await cargarDatos();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "No se pudo eliminar el cliente.",
-      );
+      setError(err instanceof Error ? err.message : "Error eliminando cliente");
     }
   };
 
   return (
     <div className="space-y-6">
+      {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Clientes</h1>
@@ -242,21 +245,10 @@ export function Clientes() {
           </p>
         </div>
 
-        <div className="flex gap-2">
-          <Button
-            variant="secondary"
-            onClick={cargarClientes}
-            disabled={loading}
-          >
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Actualizar
-          </Button>
-
-          <Button onClick={abrirNuevo}>
-            <Plus className="w-4 h-4 mr-2" />
-            Nuevo cliente
-          </Button>
-        </div>
+        <Button onClick={abrirCrear}>
+          <Plus className="w-4 h-4 mr-2" />
+          Nuevo cliente
+        </Button>
       </div>
 
       {error && (
@@ -265,124 +257,32 @@ export function Clientes() {
         </div>
       )}
 
-      {showForm && (
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>
-                {editingId ? "Editar cliente" : "Nuevo cliente"}
-              </CardTitle>
-              <button
-                type="button"
-                onClick={cerrarFormulario}
-                className="p-2 hover:bg-gray-100 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-          </CardHeader>
-
-          <CardContent>
-            <form
-              onSubmit={guardarCliente}
-              className="grid grid-cols-1 md:grid-cols-2 gap-4"
-            >
-              <Input
-                label="ID"
-                placeholder="CLI006"
-                value={form.id || ""}
-                disabled={Boolean(editingId)}
-                onChange={(e) => handleChange("id", e.target.value)}
-              />
-
-              <Input
-                label="Nombre completo"
-                placeholder="Nombre del cliente"
-                value={form.nombre}
-                onChange={(e) => handleChange("nombre", e.target.value)}
-              />
-
-              <Input
-                label="Correo electrónico"
-                type="email"
-                placeholder="cliente@mail.com"
-                value={form.email || ""}
-                onChange={(e) => handleChange("email", e.target.value)}
-              />
-
-              <Input
-                label="Teléfono"
-                placeholder="3001234567"
-                value={form.telefono || ""}
-                onChange={(e) => handleChange("telefono", e.target.value)}
-              />
-
-              <Input
-                label="Dirección"
-                placeholder="Dirección"
-                value={form.direccion || ""}
-                onChange={(e) => handleChange("direccion", e.target.value)}
-              />
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Estado
-                </label>
-                <select
-                  value={form.estado}
-                  onChange={(e) =>
-                    handleChange("estado", e.target.value as EstadoCliente)
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                >
-                  <option value="ACTIVO">ACTIVO</option>
-                  <option value="INACTIVO">INACTIVO</option>
-                  <option value="SUSPENDIDO">SUSPENDIDO</option>
-                </select>
-              </div>
-
-              <div className="md:col-span-2 flex justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={cerrarFormulario}
-                >
-                  Cancelar
-                </Button>
-
-                <Button type="submit" disabled={saving}>
-                  {saving ? "Guardando..." : "Guardar"}
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      )}
-
+      {/* Filters */}
       <Card>
         <CardContent className="pt-6">
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-1">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+
                 <input
                   type="text"
-                  placeholder="Buscar por ID, nombre, email o teléfono..."
+                  placeholder="Buscar por nombre o email..."
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
             </div>
 
-            <div className="flex gap-2 flex-wrap">
+            <div className="flex gap-2 overflow-x-auto">
               {(["TODOS", "ACTIVO", "INACTIVO", "SUSPENDIDO"] as const).map(
                 (estado) => (
                   <button
                     key={estado}
                     type="button"
                     onClick={() => setFilterEstado(estado)}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium ${
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
                       filterEstado === estado
                         ? "bg-emerald-600 text-white"
                         : "bg-gray-100 text-gray-700 hover:bg-gray-200"
@@ -397,208 +297,387 @@ export function Clientes() {
         </CardContent>
       </Card>
 
+      {/* Table */}
       <Card padding={false}>
-        <CardContent>
-          {loading ? (
-            <div className="p-6 text-center text-gray-500">
-              Cargando clientes...
-            </div>
-          ) : filteredClientes.length === 0 ? (
-            <div className="p-6 text-center text-gray-500">
-              No hay clientes para mostrar.
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Teléfono</TableHead>
-                  <TableHead>Dirección</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead>Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  ID
+                </th>
+                <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Nombre completo
+                </th>
+                <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Email
+                </th>
+                <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Teléfono
+                </th>
+                <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Estado
+                </th>
+                <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Acciones
+                </th>
+              </tr>
+            </thead>
 
-              <TableBody>
-                {filteredClientes.map((cliente) => (
-                  <TableRow
+            <tbody className="bg-white divide-y divide-gray-200">
+              {loading ? (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="px-6 py-10 text-center text-gray-500"
+                  >
+                    Cargando clientes...
+                  </td>
+                </tr>
+              ) : clientesFiltrados.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="px-6 py-10 text-center text-gray-500"
+                  >
+                    No hay clientes para mostrar.
+                  </td>
+                </tr>
+              ) : (
+                clientesFiltrados.map((cliente) => (
+                  <tr
                     key={cliente.id}
                     onClick={() => setSelectedClienteId(cliente.id)}
-                    className="cursor-pointer hover:bg-gray-50 transition-colors"
+                    className="cursor-pointer hover:bg-gray-50"
                   >
-                    <TableCell>
-                      <code className="text-xs bg-gray-100 px-2 py-1 rounded">
-                        {cliente.id}
-                      </code>
-                    </TableCell>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      #{cliente.id}
+                    </td>
 
-                    <TableCell className="font-medium text-gray-900">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {cliente.nombre}
-                    </TableCell>
+                    </td>
 
-                    <TableCell className="text-gray-600">
-                      {cliente.email || "Sin email"}
-                    </TableCell>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      {formatearVacio(cliente.email)}
+                    </td>
 
-                    <TableCell className="text-gray-600">
-                      {cliente.telefono || "Sin teléfono"}
-                    </TableCell>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      {formatearVacio(cliente.telefono)}
+                    </td>
 
-                    <TableCell className="text-gray-600">
-                      {cliente.direccion || "Sin dirección"}
-                    </TableCell>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <EstadoBadge estado={cliente.estado} />
+                    </td>
 
-                    <TableCell>
-                      <Badge variant={getBadgeVariant(cliente.estado)}>
-                        {cliente.estado}
-                      </Badge>
-                    </TableCell>
-
-                    <TableCell>
+                    <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            abrirEdicion(cliente);
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            abrirEditar(cliente);
                           }}
                           className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
-                          title="Editar"
+                          title="Editar cliente"
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
 
                         <button
                           type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
+                          onClick={(event) => {
+                            event.stopPropagation();
                             eliminarCliente(cliente);
                           }}
                           className="p-1.5 text-red-600 hover:bg-red-50 rounded"
-                          title="Eliminar"
+                          title="Eliminar cliente"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </Card>
 
-      {selectedClienteId && clienteSeleccionado && (
-        <div className="fixed inset-y-0 right-0 w-[420px] bg-white shadow-2xl border-l border-gray-200 overflow-y-auto z-50">
-          <div className="p-7">
-            <div className="flex items-center justify-between mb-10">
-              <h2 className="text-2xl font-bold text-gray-900">
+      {/* Side Panel */}
+      {selectedCliente && (
+        <div className="fixed inset-y-0 right-0 w-96 bg-white shadow-xl border-l border-gray-200 overflow-y-auto z-50">
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold text-gray-900">
                 Detalles del cliente
               </h2>
 
               <button
                 type="button"
                 onClick={() => setSelectedClienteId(null)}
-                className="p-2 hover:bg-gray-100 rounded-lg text-gray-900"
+                className="p-2 hover:bg-gray-100 rounded-lg"
               >
-                <X className="w-6 h-6" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="flex items-start justify-between mb-6">
-              <h3 className="text-xl font-semibold text-gray-900">
-                {clienteSeleccionado.nombre}
-              </h3>
+            <div className="space-y-6">
+              {/* Client Info */}
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-semibold text-gray-900">
+                    {selectedCliente.nombre}
+                  </h3>
 
-              <Badge variant={getBadgeVariant(clienteSeleccionado.estado)}>
-                {clienteSeleccionado.estado}
-              </Badge>
-            </div>
-
-            <div className="space-y-5 mb-8">
-              <div className="flex items-start gap-4">
-                <Mail className="w-6 h-6 text-gray-400 mt-1" />
-                <div>
-                  <p className="text-gray-500">Email</p>
-                  <p className="text-gray-900">
-                    {clienteSeleccionado.email || "Sin email"}
-                  </p>
+                  <EstadoBadge estado={selectedCliente.estado} />
                 </div>
-              </div>
 
-              <div className="flex items-start gap-4">
-                <Phone className="w-6 h-6 text-gray-400 mt-1" />
-                <div>
-                  <p className="text-gray-500">Teléfono</p>
-                  <p className="text-gray-900">
-                    {clienteSeleccionado.telefono || "Sin teléfono"}
-                  </p>
-                </div>
-              </div>
+                <div className="space-y-3">
+                  <div className="flex items-start gap-3">
+                    <Mail className="w-5 h-5 text-gray-400 mt-0.5" />
 
-              <div className="flex items-start gap-4">
-                <MapPin className="w-6 h-6 text-gray-400 mt-1" />
-                <div>
-                  <p className="text-gray-500">Dirección</p>
-                  <p className="text-gray-900">
-                    {clienteSeleccionado.direccion || "Sin dirección"}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="mb-8">
-              <h3 className="font-semibold text-gray-900 mb-3">
-                Mascotas ({mascotasCliente.length})
-              </h3>
-
-              <div className="space-y-2">
-                {mascotasCliente.length === 0 ? (
-                  <div className="rounded-2xl bg-gray-50 p-4 text-gray-500">
-                    Este cliente no tiene mascotas registradas.
-                  </div>
-                ) : (
-                  mascotasCliente.map((mascota) => (
-                    <div
-                      key={mascota.id}
-                      className="rounded-2xl bg-gray-50 p-4 flex items-center justify-between"
-                    >
-                      <div>
-                        <p className="text-lg font-semibold text-gray-900">
-                          {mascota.nombre}
-                        </p>
-                        <p className="text-gray-500">
-                          {mascota.raza || "Sin raza"} • {mascota.especie}
-                        </p>
-                      </div>
-
-                      <span className="px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-700 border border-blue-200">
-                        {mascota.estadoSalud || "Sin estado"}
-                      </span>
+                    <div>
+                      <p className="text-sm text-gray-500">Email</p>
+                      <p className="text-sm text-gray-900">
+                        {formatearVacio(selectedCliente.email)}
+                      </p>
                     </div>
-                  ))
-                )}
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <Phone className="w-5 h-5 text-gray-400 mt-0.5" />
+
+                    <div>
+                      <p className="text-sm text-gray-500">Teléfono</p>
+                      <p className="text-sm text-gray-900">
+                        {formatearVacio(selectedCliente.telefono)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <MapPin className="w-5 h-5 text-gray-400 mt-0.5" />
+
+                    <div>
+                      <p className="text-sm text-gray-500">Dirección</p>
+                      <p className="text-sm text-gray-900">
+                        {formatearVacio(selectedCliente.direccion)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Mascotas */}
+              <div>
+                <h3 className="font-semibold text-gray-900 mb-3">
+                  Mascotas ({mascotasCliente.length})
+                </h3>
+
+                <div className="space-y-2">
+                  {mascotasCliente.map((mascota) => (
+                    <div key={mascota.id} className="p-3 bg-gray-50 rounded-lg">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="font-medium text-gray-900">
+                            {mascota.nombre}
+                          </p>
+
+                          <p className="text-sm text-gray-500">
+                            {formatearVacio(mascota.raza)} • {mascota.especie}
+                          </p>
+                        </div>
+
+                        <EstadoBadge
+                          estado={mascota.estadoSalud || "Sin estado"}
+                          size="sm"
+                        />
+                      </div>
+                    </div>
+                  ))}
+
+                  {mascotasCliente.length === 0 && (
+                    <p className="text-sm text-gray-500 text-center py-4">
+                      No hay mascotas registradas
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  className="flex-1"
+                  onClick={() => abrirEditar(selectedCliente)}
+                >
+                  Editar cliente
+                </Button>
+
+                <Button
+                  variant="danger"
+                  className="flex-1"
+                  onClick={() => eliminarCliente(selectedCliente)}
+                >
+                  Eliminar
+                </Button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
 
-            <div className="grid grid-cols-2 gap-3">
-              <Button
-                variant="secondary"
-                onClick={() => abrirEdicion(clienteSeleccionado)}
-              >
-                Editar cliente
-              </Button>
+      {/* Modal Crear / Editar */}
+      {modalAbierto && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 px-4">
+          <div className="w-full max-w-2xl rounded-lg bg-white shadow-xl">
+            <form onSubmit={guardarCliente}>
+              <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">
+                    {editando ? "Editar cliente" : "Nuevo cliente"}
+                  </h2>
+                  <p className="text-sm text-gray-500">
+                    Completa la información del cliente
+                  </p>
+                </div>
 
-              <Button
-                variant="danger"
-                onClick={() => eliminarCliente(clienteSeleccionado)}
-              >
-                Eliminar
-              </Button>
-            </div>
+                <button
+                  type="button"
+                  onClick={cerrarModal}
+                  className="p-2 hover:bg-gray-100 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-6 py-5">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    ID
+                  </label>
+
+                  <input
+                    type="text"
+                    value={form.id || ""}
+                    disabled={Boolean(editando)}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, id: event.target.value }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-gray-100"
+                    placeholder="CLI001"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Estado
+                  </label>
+
+                  <select
+                    value={form.estado}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        estado: event.target.value as EstadoCliente,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="ACTIVO">ACTIVO</option>
+                    <option value="INACTIVO">INACTIVO</option>
+                    <option value="SUSPENDIDO">SUSPENDIDO</option>
+                  </select>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Nombre completo
+                  </label>
+
+                  <input
+                    type="text"
+                    value={form.nombre}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        nombre: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    placeholder="Juan Pérez"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Email
+                  </label>
+
+                  <input
+                    type="email"
+                    value={form.email || ""}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        email: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    placeholder="cliente@email.com"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Teléfono
+                  </label>
+
+                  <input
+                    type="text"
+                    value={form.telefono || ""}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        telefono: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    placeholder="+56 9 1234 5678"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Dirección
+                  </label>
+
+                  <input
+                    type="text"
+                    value={form.direccion || ""}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        direccion: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    placeholder="Calle Los Álamos 123, Santiago"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-gray-200 px-6 py-4">
+                <Button type="button" variant="secondary" onClick={cerrarModal}>
+                  Cancelar
+                </Button>
+
+                <Button type="submit" disabled={guardando}>
+                  {guardando ? "Guardando..." : "Guardar cliente"}
+                </Button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -1,68 +1,30 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Edit2, Package, Plus, Trash2, X } from "lucide-react";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "../components/ui/card";
-import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../components/ui/table";
-import {
-  Plus,
-  Edit2,
-  Trash2,
-  Package,
-  RefreshCw,
-  X,
-  Search,
-  Stethoscope,
-  Pill,
-} from "lucide-react";
-import {
-  ActivoServicio,
+import type {
   Medicamento,
   MedicamentoInput,
-  Servicio,
-  ServicioInput,
-  TipoServicio,
+  Vacuna,
+  VacunaInput,
+} from "../services/api";
+import {
   createMedicamento,
-  createServicio,
+  createVacuna,
   deleteMedicamento,
-  deleteServicio,
+  deleteVacuna,
   getMedicamentos,
-  getServicios,
+  getVacunas,
   updateMedicamento,
-  updateServicio,
+  updateVacuna,
 } from "../services/api";
 
-type TabInventario = "servicios" | "medicamentos";
-
-const tiposServicio: TipoServicio[] = [
-  "CONSULTA",
-  "PROCEDIMIENTO",
-  "TERAPIA",
-  "VACUNACION",
-  "PLAN_VACUNACION",
-  "OTRO",
-];
-
-const servicioInicial: ServicioInput = {
-  id: "",
-  nombre: "",
-  tipoServicio: "CONSULTA",
-  precio: "",
-  descripcion: "",
-  activo: "S",
-};
+type InventarioTab = "medicamentos" | "vacunas";
 
 const medicamentoInicial: MedicamentoInput = {
   id: "",
@@ -71,42 +33,57 @@ const medicamentoInicial: MedicamentoInput = {
   precioUnitario: "",
 };
 
-function formatoMoneda(valor: number | string | null | undefined) {
-  const numero = Number(valor || 0);
+const vacunaInicial: VacunaInput = {
+  id: "",
+  nombre: "",
+  laboratorio: "",
+  lote: "",
+  fechaVencimiento: "",
+  especieObjetivo: "",
+  precio: "",
+};
 
-  return `$${numero.toLocaleString("es-CO")}`;
+function formatearDinero(valor: number | string | null | undefined) {
+  return `$${Number(valor || 0).toLocaleString("es-CO")}`;
 }
 
-function getActivoBadgeVariant(activo: ActivoServicio) {
-  return activo === "S" ? "success" : "warning";
+function formatearDineroCorto(valor: number | string | null | undefined) {
+  const numero = Number(valor || 0);
+
+  if (numero >= 1_000_000) {
+    return `$${(numero / 1_000_000).toFixed(numero >= 10_000_000 ? 0 : 1)}M`;
+  }
+
+  if (numero >= 1_000) {
+    return `$${(numero / 1_000).toFixed(0)}k`;
+  }
+
+  return formatearDinero(numero);
+}
+
+function formatearVacio(valor?: string | number | null) {
+  if (valor === null || valor === undefined || valor === "") {
+    return "Sin registrar";
+  }
+
+  return String(valor);
 }
 
 export function Inventario() {
-  const [activeTab, setActiveTab] = useState<TabInventario>("servicios");
-
-  const [servicios, setServicios] = useState<Servicio[]>([]);
+  const [activeTab, setActiveTab] = useState<InventarioTab>("medicamentos");
   const [medicamentos, setMedicamentos] = useState<Medicamento[]>([]);
+  const [vacunas, setVacunas] = useState<Vacuna[]>([]);
 
-  const [formServicio, setFormServicio] =
-    useState<ServicioInput>(servicioInicial);
+  const [modalMedicamentoAbierto, setModalMedicamentoAbierto] = useState(false);
+  const [modalVacunaAbierto, setModalVacunaAbierto] = useState(false);
+
+  const [editandoMedicamento, setEditandoMedicamento] =
+    useState<Medicamento | null>(null);
+  const [editandoVacuna, setEditandoVacuna] = useState<Vacuna | null>(null);
+
   const [formMedicamento, setFormMedicamento] =
     useState<MedicamentoInput>(medicamentoInicial);
-
-  const [editingServicioId, setEditingServicioId] = useState<string | null>(
-    null,
-  );
-  const [editingMedicamentoId, setEditingMedicamentoId] = useState<
-    string | null
-  >(null);
-
-  const [showForm, setShowForm] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [filterTipoServicio, setFilterTipoServicio] = useState<
-    "TODOS" | TipoServicio
-  >("TODOS");
-  const [filterActivoServicio, setFilterActivoServicio] = useState<
-    "TODOS" | ActivoServicio
-  >("TODOS");
+  const [formVacuna, setFormVacuna] = useState<VacunaInput>(vacunaInicial);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -117,16 +94,16 @@ export function Inventario() {
       setLoading(true);
       setError("");
 
-      const [serviciosData, medicamentosData] = await Promise.all([
-        getServicios(),
+      const [medicamentosData, vacunasData] = await Promise.all([
         getMedicamentos(),
+        getVacunas(),
       ]);
 
-      setServicios(serviciosData);
       setMedicamentos(medicamentosData);
+      setVacunas(vacunasData);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "No se pudo cargar el inventario.",
+        err instanceof Error ? err.message : "Error cargando inventario",
       );
     } finally {
       setLoading(false);
@@ -137,147 +114,77 @@ export function Inventario() {
     cargarDatos();
   }, []);
 
-  const serviciosFiltrados = useMemo(() => {
-    const search = searchTerm.toLowerCase().trim();
+  const valorInventario = useMemo(() => {
+    const totalMedicamentos = medicamentos.reduce(
+      (sum, medicamento) => sum + Number(medicamento.precioUnitario || 0),
+      0,
+    );
 
-    return servicios.filter((servicio) => {
-      const matchesSearch =
-        servicio.id.toLowerCase().includes(search) ||
-        servicio.nombre.toLowerCase().includes(search) ||
-        servicio.tipoServicio.toLowerCase().includes(search) ||
-        (servicio.descripcion || "").toLowerCase().includes(search);
+    const totalVacunas = vacunas.reduce(
+      (sum, vacuna) => sum + Number(vacuna.precio || 0),
+      0,
+    );
 
-      const matchesTipo =
-        filterTipoServicio === "TODOS" ||
-        servicio.tipoServicio === filterTipoServicio;
+    return totalMedicamentos + totalVacunas;
+  }, [medicamentos, vacunas]);
 
-      const matchesActivo =
-        filterActivoServicio === "TODOS" ||
-        servicio.activo === filterActivoServicio;
-
-      return matchesSearch && matchesTipo && matchesActivo;
-    });
-  }, [servicios, searchTerm, filterTipoServicio, filterActivoServicio]);
-
-  const medicamentosFiltrados = useMemo(() => {
-    const search = searchTerm.toLowerCase().trim();
-
-    return medicamentos.filter((medicamento) => {
-      return (
-        medicamento.id.toLowerCase().includes(search) ||
-        medicamento.nombre.toLowerCase().includes(search) ||
-        (medicamento.descripcion || "").toLowerCase().includes(search)
-      );
-    });
-  }, [medicamentos, searchTerm]);
-
-  const serviciosActivos = servicios.filter(
-    (servicio) => servicio.activo === "S",
-  );
-
-  const abrirNuevo = (tab: TabInventario = activeTab) => {
-    setActiveTab(tab);
-    setShowForm(true);
+  const abrirNuevoItem = () => {
     setError("");
 
-    if (tab === "servicios") {
-      setEditingServicioId(null);
-      setFormServicio(servicioInicial);
-    } else {
-      setEditingMedicamentoId(null);
+    if (activeTab === "medicamentos") {
+      setEditandoMedicamento(null);
       setFormMedicamento(medicamentoInicial);
+      setModalMedicamentoAbierto(true);
+      return;
     }
+
+    setEditandoVacuna(null);
+    setFormVacuna(vacunaInicial);
+    setModalVacunaAbierto(true);
   };
 
-  const cancelarFormulario = () => {
-    setShowForm(false);
-    setEditingServicioId(null);
-    setEditingMedicamentoId(null);
-    setFormServicio(servicioInicial);
-    setFormMedicamento(medicamentoInicial);
+  const abrirEditarMedicamento = (medicamento: Medicamento) => {
     setError("");
-  };
-
-  const iniciarEdicionServicio = (servicio: Servicio) => {
-    setActiveTab("servicios");
-    setShowForm(true);
-    setEditingServicioId(servicio.id);
-    setEditingMedicamentoId(null);
-    setError("");
-
-    setFormServicio({
-      id: servicio.id,
-      nombre: servicio.nombre,
-      tipoServicio: servicio.tipoServicio,
-      precio: servicio.precio,
-      descripcion: servicio.descripcion || "",
-      activo: servicio.activo,
-    });
-  };
-
-  const iniciarEdicionMedicamento = (medicamento: Medicamento) => {
-    setActiveTab("medicamentos");
-    setShowForm(true);
-    setEditingMedicamentoId(medicamento.id);
-    setEditingServicioId(null);
-    setError("");
-
+    setEditandoMedicamento(medicamento);
     setFormMedicamento({
       id: medicamento.id,
-      nombre: medicamento.nombre,
+      nombre: medicamento.nombre || "",
       descripcion: medicamento.descripcion || "",
-      precioUnitario: medicamento.precioUnitario,
+      precioUnitario: medicamento.precioUnitario ?? "",
     });
+    setModalMedicamentoAbierto(true);
   };
 
-  const guardarServicio = async (event: React.FormEvent) => {
-    event.preventDefault();
-
-    if (!formServicio.nombre.trim()) {
-      setError("El nombre del servicio es obligatorio.");
-      return;
-    }
-
-    if (Number(formServicio.precio) < 0) {
-      setError("El precio del servicio no puede ser negativo.");
-      return;
-    }
-
-    try {
-      setSaving(true);
-      setError("");
-
-      const payload: ServicioInput = {
-        ...formServicio,
-        id: formServicio.id?.trim(),
-        nombre: formServicio.nombre.trim(),
-        descripcion: formServicio.descripcion?.trim() || null,
-        precio: Number(formServicio.precio || 0),
-      };
-
-      if (editingServicioId) {
-        await updateServicio(editingServicioId, payload);
-      } else {
-        if (!payload.id) {
-          setError("El ID del servicio es obligatorio.");
-          return;
-        }
-
-        await createServicio(payload);
-      }
-
-      await cargarDatos();
-      cancelarFormulario();
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "No se pudo guardar el servicio.",
-      );
-    } finally {
-      setSaving(false);
-    }
+  const abrirEditarVacuna = (vacuna: Vacuna) => {
+    setError("");
+    setEditandoVacuna(vacuna);
+    setFormVacuna({
+      id: vacuna.id,
+      nombre: vacuna.nombre || "",
+      laboratorio: vacuna.laboratorio || "",
+      lote: vacuna.lote || "",
+      fechaVencimiento: vacuna.fechaVencimiento || "",
+      especieObjetivo: vacuna.especieObjetivo || "",
+      precio: vacuna.precio ?? "",
+    });
+    setModalVacunaAbierto(true);
   };
 
-  const guardarMedicamento = async (event: React.FormEvent) => {
+  const cerrarModalMedicamento = () => {
+    setModalMedicamentoAbierto(false);
+    setEditandoMedicamento(null);
+    setFormMedicamento(medicamentoInicial);
+  };
+
+  const cerrarModalVacuna = () => {
+    setModalVacunaAbierto(false);
+    setEditandoVacuna(null);
+    setFormVacuna(vacunaInicial);
+  };
+
+  const guardarMedicamento = async (
+    event: React.FormEvent<HTMLFormElement>,
+  ) => {
     event.preventDefault();
 
     if (!formMedicamento.nombre.trim()) {
@@ -285,7 +192,12 @@ export function Inventario() {
       return;
     }
 
-    if (Number(formMedicamento.precioUnitario) < 0) {
+    if (!editandoMedicamento && !formMedicamento.id?.trim()) {
+      setError("El ID del medicamento es obligatorio.");
+      return;
+    }
+
+    if (Number(formMedicamento.precioUnitario || 0) < 0) {
       setError("El precio unitario no puede ser negativo.");
       return;
     }
@@ -295,58 +207,79 @@ export function Inventario() {
       setError("");
 
       const payload: MedicamentoInput = {
-        ...formMedicamento,
         id: formMedicamento.id?.trim(),
         nombre: formMedicamento.nombre.trim(),
         descripcion: formMedicamento.descripcion?.trim() || null,
         precioUnitario: Number(formMedicamento.precioUnitario || 0),
       };
 
-      if (editingMedicamentoId) {
-        await updateMedicamento(editingMedicamentoId, payload);
+      if (editandoMedicamento) {
+        await updateMedicamento(editandoMedicamento.id, payload);
       } else {
-        if (!payload.id) {
-          setError("El ID del medicamento es obligatorio.");
-          return;
-        }
-
         await createMedicamento(payload);
       }
 
       await cargarDatos();
-      cancelarFormulario();
+      cerrarModalMedicamento();
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "No se pudo guardar el medicamento.",
+        err instanceof Error ? err.message : "Error guardando medicamento",
       );
     } finally {
       setSaving(false);
     }
   };
 
-  const eliminarServicio = async (servicio: Servicio) => {
-    const confirmado = window.confirm(
-      `¿Eliminar el servicio "${servicio.nombre}"?`,
-    );
+  const guardarVacuna = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
 
-    if (!confirmado) return;
+    if (!formVacuna.nombre.trim()) {
+      setError("El nombre de la vacuna es obligatorio.");
+      return;
+    }
+
+    if (!editandoVacuna && !formVacuna.id?.trim()) {
+      setError("El ID de la vacuna es obligatorio.");
+      return;
+    }
+
+    if (Number(formVacuna.precio || 0) < 0) {
+      setError("El precio no puede ser negativo.");
+      return;
+    }
 
     try {
+      setSaving(true);
       setError("");
-      await deleteServicio(servicio.id);
+
+      const payload: VacunaInput = {
+        id: formVacuna.id?.trim(),
+        nombre: formVacuna.nombre.trim(),
+        laboratorio: formVacuna.laboratorio?.trim() || null,
+        lote: formVacuna.lote?.trim() || null,
+        fechaVencimiento: formVacuna.fechaVencimiento || null,
+        especieObjetivo: formVacuna.especieObjetivo?.trim() || null,
+        precio: Number(formVacuna.precio || 0),
+      };
+
+      if (editandoVacuna) {
+        await updateVacuna(editandoVacuna.id, payload);
+      } else {
+        await createVacuna(payload);
+      }
+
       await cargarDatos();
+      cerrarModalVacuna();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "No se pudo eliminar el servicio.",
-      );
+      setError(err instanceof Error ? err.message : "Error guardando vacuna");
+    } finally {
+      setSaving(false);
     }
   };
 
   const eliminarMedicamento = async (medicamento: Medicamento) => {
     const confirmado = window.confirm(
-      `¿Eliminar el medicamento "${medicamento.nombre}"?`,
+      `¿Seguro que deseas eliminar el medicamento "${medicamento.nombre}"?`,
     );
 
     if (!confirmado) return;
@@ -357,348 +290,63 @@ export function Inventario() {
       await cargarDatos();
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "No se pudo eliminar el medicamento.",
+        err instanceof Error ? err.message : "Error eliminando medicamento",
       );
     }
   };
 
-  const renderFormulario = () => {
-    if (!showForm) return null;
-
-    if (activeTab === "servicios") {
-      return (
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>
-                {editingServicioId ? "Editar servicio" : "Nuevo servicio"}
-              </CardTitle>
-
-              <button
-                type="button"
-                onClick={cancelarFormulario}
-                className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-          </CardHeader>
-
-          <CardContent>
-            <form onSubmit={guardarServicio} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    ID
-                  </label>
-                  <Input
-                    value={formServicio.id || ""}
-                    disabled={Boolean(editingServicioId)}
-                    onChange={(event) =>
-                      setFormServicio((prev) => ({
-                        ...prev,
-                        id: event.target.value,
-                      }))
-                    }
-                    placeholder="SVC006"
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Nombre
-                  </label>
-                  <Input
-                    value={formServicio.nombre}
-                    onChange={(event) =>
-                      setFormServicio((prev) => ({
-                        ...prev,
-                        nombre: event.target.value,
-                      }))
-                    }
-                    placeholder="Consulta general"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Tipo
-                  </label>
-                  <select
-                    value={formServicio.tipoServicio}
-                    onChange={(event) =>
-                      setFormServicio((prev) => ({
-                        ...prev,
-                        tipoServicio: event.target.value as TipoServicio,
-                      }))
-                    }
-                    className="w-full h-10 px-3 border border-gray-300 rounded-md bg-white"
-                  >
-                    {tiposServicio.map((tipo) => (
-                      <option key={tipo} value={tipo}>
-                        {tipo}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Precio
-                  </label>
-                  <Input
-                    type="number"
-                    min="0"
-                    value={formServicio.precio}
-                    onChange={(event) =>
-                      setFormServicio((prev) => ({
-                        ...prev,
-                        precio: event.target.value,
-                      }))
-                    }
-                    placeholder="50000"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                <div className="md:col-span-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Descripción
-                  </label>
-                  <Input
-                    value={formServicio.descripcion || ""}
-                    onChange={(event) =>
-                      setFormServicio((prev) => ({
-                        ...prev,
-                        descripcion: event.target.value,
-                      }))
-                    }
-                    placeholder="Descripción del servicio"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Activo
-                  </label>
-                  <select
-                    value={formServicio.activo}
-                    onChange={(event) =>
-                      setFormServicio((prev) => ({
-                        ...prev,
-                        activo: event.target.value as ActivoServicio,
-                      }))
-                    }
-                    className="w-full h-10 px-3 border border-gray-300 rounded-md bg-white"
-                  >
-                    <option value="S">Sí</option>
-                    <option value="N">No</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex gap-2">
-                <Button type="submit" disabled={saving}>
-                  {saving ? "Guardando..." : "Guardar servicio"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={cancelarFormulario}
-                >
-                  Cancelar
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      );
-    }
-
-    return (
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>
-              {editingMedicamentoId
-                ? "Editar medicamento"
-                : "Nuevo medicamento"}
-            </CardTitle>
-
-            <button
-              type="button"
-              onClick={cancelarFormulario}
-              className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-        </CardHeader>
-
-        <CardContent>
-          <form onSubmit={guardarMedicamento} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  ID
-                </label>
-                <Input
-                  value={formMedicamento.id || ""}
-                  disabled={Boolean(editingMedicamentoId)}
-                  onChange={(event) =>
-                    setFormMedicamento((prev) => ({
-                      ...prev,
-                      id: event.target.value,
-                    }))
-                  }
-                  placeholder="MED006"
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Nombre
-                </label>
-                <Input
-                  value={formMedicamento.nombre}
-                  onChange={(event) =>
-                    setFormMedicamento((prev) => ({
-                      ...prev,
-                      nombre: event.target.value,
-                    }))
-                  }
-                  placeholder="Amoxicilina"
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Precio unitario
-                </label>
-                <Input
-                  type="number"
-                  min="0"
-                  value={formMedicamento.precioUnitario}
-                  onChange={(event) =>
-                    setFormMedicamento((prev) => ({
-                      ...prev,
-                      precioUnitario: event.target.value,
-                    }))
-                  }
-                  placeholder="25000"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Descripción
-              </label>
-              <Input
-                value={formMedicamento.descripcion || ""}
-                onChange={(event) =>
-                  setFormMedicamento((prev) => ({
-                    ...prev,
-                    descripcion: event.target.value,
-                  }))
-                }
-                placeholder="Descripción del medicamento"
-              />
-            </div>
-
-            <div className="flex gap-2">
-              <Button type="submit" disabled={saving}>
-                {saving ? "Guardando..." : "Guardar medicamento"}
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={cancelarFormulario}
-              >
-                Cancelar
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+  const eliminarVacuna = async (vacuna: Vacuna) => {
+    const confirmado = window.confirm(
+      `¿Seguro que deseas eliminar la vacuna "${vacuna.nombre}"?`,
     );
+
+    if (!confirmado) return;
+
+    try {
+      setError("");
+      await deleteVacuna(vacuna.id);
+      await cargarDatos();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error eliminando vacuna");
+    }
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
+      {/* Page Header */}
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">
             Inventario médico
           </h1>
           <p className="text-gray-500 mt-1">
-            Gestiona servicios clínicos y medicamentos reales desde Oracle
+            Gestiona el stock de medicamentos y vacunas
           </p>
         </div>
 
-        <div className="flex gap-2">
-          <Button type="button" variant="secondary" onClick={cargarDatos}>
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Actualizar
-          </Button>
-
-          <Button type="button" onClick={() => abrirNuevo(activeTab)}>
-            <Plus className="w-4 h-4 mr-2" />
-            Nuevo
-          </Button>
-        </div>
+        <Button onClick={abrirNuevoItem}>
+          <Plus className="w-4 h-4 mr-2" />
+          Nuevo item
+        </Button>
       </div>
 
       {error && (
-        <div className="p-4 border border-red-200 bg-red-50 text-red-700 rounded-lg">
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       )}
 
+      {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-emerald-100 rounded-lg flex items-center justify-center">
-                <Stethoscope className="w-6 h-6 text-emerald-600" />
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Total servicios</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {servicios.length}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                <Package className="w-6 h-6 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Servicios activos</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {serviciosActivos.length}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
               <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
-                <Pill className="w-6 h-6 text-purple-600" />
+                <Package className="w-6 h-6 text-purple-600" />
               </div>
+
               <div>
-                <p className="text-sm text-gray-500">Medicamentos</p>
+                <p className="text-sm text-gray-500">Total medicamentos</p>
                 <p className="text-2xl font-bold text-gray-900">
                   {medicamentos.length}
                 </p>
@@ -706,254 +354,584 @@ export function Inventario() {
             </div>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-emerald-100 rounded-lg flex items-center justify-center">
+                <Package className="w-6 h-6 text-emerald-600" />
+              </div>
+
+              <div>
+                <p className="text-sm text-gray-500">Total vacunas</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {vacunas.length}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center">
+                <Package className="w-6 h-6 text-amber-600" />
+              </div>
+
+              <div>
+                <p className="text-sm text-gray-500">Valor inventario</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {formatearDineroCorto(valorInventario)}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
+      {/* Tabs */}
       <Card>
         <CardContent className="pt-6">
-          <div className="flex flex-col lg:flex-row gap-4">
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveTab("servicios");
-                  cancelarFormulario();
-                }}
-                className={`px-4 py-2 rounded-lg text-sm font-medium ${
-                  activeTab === "servicios"
-                    ? "bg-emerald-600 text-white"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
-              >
-                Servicios
-              </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveTab("medicamentos")}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                activeTab === "medicamentos"
+                  ? "bg-emerald-600 text-white"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              }`}
+            >
+              Medicamentos
+            </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveTab("medicamentos");
-                  cancelarFormulario();
-                }}
-                className={`px-4 py-2 rounded-lg text-sm font-medium ${
-                  activeTab === "medicamentos"
-                    ? "bg-emerald-600 text-white"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
-              >
-                Medicamentos
-              </button>
-            </div>
-
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <Input
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder={
-                    activeTab === "servicios"
-                      ? "Buscar servicio por ID, nombre, tipo o descripción..."
-                      : "Buscar medicamento por ID, nombre o descripción..."
-                  }
-                  className="pl-10"
-                />
-              </div>
-            </div>
-
-            {activeTab === "servicios" && (
-              <div className="flex flex-wrap gap-2">
-                <select
-                  value={filterTipoServicio}
-                  onChange={(event) =>
-                    setFilterTipoServicio(
-                      event.target.value as "TODOS" | TipoServicio,
-                    )
-                  }
-                  className="h-10 px-3 border border-gray-300 rounded-md bg-white text-sm"
-                >
-                  <option value="TODOS">Todos los tipos</option>
-                  {tiposServicio.map((tipo) => (
-                    <option key={tipo} value={tipo}>
-                      {tipo}
-                    </option>
-                  ))}
-                </select>
-
-                <select
-                  value={filterActivoServicio}
-                  onChange={(event) =>
-                    setFilterActivoServicio(
-                      event.target.value as "TODOS" | ActivoServicio,
-                    )
-                  }
-                  className="h-10 px-3 border border-gray-300 rounded-md bg-white text-sm"
-                >
-                  <option value="TODOS">Todos</option>
-                  <option value="S">Activos</option>
-                  <option value="N">Inactivos</option>
-                </select>
-              </div>
-            )}
+            <button
+              type="button"
+              onClick={() => setActiveTab("vacunas")}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                activeTab === "vacunas"
+                  ? "bg-emerald-600 text-white"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              }`}
+            >
+              Vacunas
+            </button>
           </div>
         </CardContent>
       </Card>
 
-      {renderFormulario()}
+      {/* Medicamentos */}
+      {activeTab === "medicamentos" && (
+        <Card padding={false}>
+          <CardHeader className="p-6 pb-4">
+            <CardTitle>Catálogo de medicamentos</CardTitle>
+          </CardHeader>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            {activeTab === "servicios"
-              ? "Catálogo de servicios"
-              : "Catálogo de medicamentos"}
-          </CardTitle>
-        </CardHeader>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    ID
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Nombre
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Descripción
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Precio unitario
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Acciones
+                  </th>
+                </tr>
+              </thead>
 
-        <CardContent>
-          {loading ? (
-            <div className="py-10 text-center text-gray-500">
-              Cargando inventario...
-            </div>
-          ) : activeTab === "servicios" ? (
-            serviciosFiltrados.length === 0 ? (
-              <div className="py-10 text-center text-gray-500">
-                No hay servicios para mostrar.
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>ID</TableHead>
-                    <TableHead>Nombre</TableHead>
-                    <TableHead>Tipo</TableHead>
-                    <TableHead>Precio</TableHead>
-                    <TableHead>Activo</TableHead>
-                    <TableHead>Descripción</TableHead>
-                    <TableHead>Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {loading ? (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-6 py-10 text-center text-gray-500"
+                    >
+                      Cargando medicamentos...
+                    </td>
+                  </tr>
+                ) : medicamentos.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-6 py-10 text-center text-gray-500"
+                    >
+                      No hay medicamentos registrados.
+                    </td>
+                  </tr>
+                ) : (
+                  medicamentos.map((medicamento, index) => (
+                    <tr key={medicamento.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        #{index + 1}
+                      </td>
 
-                <TableBody>
-                  {serviciosFiltrados.map((servicio) => (
-                    <TableRow key={servicio.id}>
-                      <TableCell>
-                        <code className="text-xs bg-gray-100 px-2 py-1 rounded">
-                          {servicio.id}
-                        </code>
-                      </TableCell>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {medicamento.nombre}
+                      </td>
 
-                      <TableCell className="font-medium">
-                        {servicio.nombre}
-                      </TableCell>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {formatearVacio(medicamento.descripcion)}
+                      </td>
 
-                      <TableCell>
-                        <Badge variant="info">{servicio.tipoServicio}</Badge>
-                      </TableCell>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {formatearDinero(medicamento.precioUnitario)}
+                      </td>
 
-                      <TableCell className="font-medium text-emerald-700">
-                        {formatoMoneda(servicio.precio)}
-                      </TableCell>
-
-                      <TableCell>
-                        <Badge variant={getActivoBadgeVariant(servicio.activo)}>
-                          {servicio.activo === "S" ? "Activo" : "Inactivo"}
-                        </Badge>
-                      </TableCell>
-
-                      <TableCell className="text-gray-600 max-w-xs truncate">
-                        {servicio.descripcion || "Sin descripción"}
-                      </TableCell>
-
-                      <TableCell>
+                      <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => iniciarEdicionServicio(servicio)}
+                            onClick={() => abrirEditarMedicamento(medicamento)}
                             className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
-                            title="Editar"
+                            title="Editar medicamento"
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>
 
                           <button
                             type="button"
-                            onClick={() => eliminarServicio(servicio)}
+                            onClick={() => eliminarMedicamento(medicamento)}
                             className="p-1.5 text-red-600 hover:bg-red-50 rounded"
-                            title="Eliminar"
+                            title="Eliminar medicamento"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )
-          ) : medicamentosFiltrados.length === 0 ? (
-            <div className="py-10 text-center text-gray-500">
-              No hay medicamentos para mostrar.
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead>Descripción</TableHead>
-                  <TableHead>Precio unitario</TableHead>
-                  <TableHead>Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
 
-              <TableBody>
-                {medicamentosFiltrados.map((medicamento) => (
-                  <TableRow key={medicamento.id}>
-                    <TableCell>
-                      <code className="text-xs bg-gray-100 px-2 py-1 rounded">
-                        {medicamento.id}
-                      </code>
-                    </TableCell>
+      {/* Vacunas */}
+      {activeTab === "vacunas" && (
+        <Card padding={false}>
+          <CardHeader className="p-6 pb-4">
+            <CardTitle>Catálogo de vacunas</CardTitle>
+          </CardHeader>
 
-                    <TableCell className="font-medium">
-                      {medicamento.nombre}
-                    </TableCell>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    ID
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Nombre
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Laboratorio
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Lote
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Fecha vencimiento
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Precio
+                  </th>
+                  <th className="text-left px-6 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Acciones
+                  </th>
+                </tr>
+              </thead>
 
-                    <TableCell className="text-gray-600 max-w-md truncate">
-                      {medicamento.descripcion || "Sin descripción"}
-                    </TableCell>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {loading ? (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="px-6 py-10 text-center text-gray-500"
+                    >
+                      Cargando vacunas...
+                    </td>
+                  </tr>
+                ) : vacunas.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="px-6 py-10 text-center text-gray-500"
+                    >
+                      No hay vacunas registradas.
+                    </td>
+                  </tr>
+                ) : (
+                  vacunas.map((vacuna, index) => (
+                    <tr key={vacuna.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        #{index + 1}
+                      </td>
 
-                    <TableCell className="font-medium text-emerald-700">
-                      {formatoMoneda(medicamento.precioUnitario)}
-                    </TableCell>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {vacuna.nombre}
+                      </td>
 
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => iniciarEdicionMedicamento(medicamento)}
-                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
-                          title="Editar"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {formatearVacio(vacuna.laboratorio)}
+                      </td>
 
-                        <button
-                          type="button"
-                          onClick={() => eliminarMedicamento(medicamento)}
-                          className="p-1.5 text-red-600 hover:bg-red-50 rounded"
-                          title="Eliminar"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <code className="text-xs bg-gray-100 px-2 py-1 rounded">
+                          {formatearVacio(vacuna.lote)}
+                        </code>
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {formatearVacio(vacuna.fechaVencimiento)}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {formatearDinero(vacuna.precio)}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => abrirEditarVacuna(vacuna)}
+                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
+                            title="Editar vacuna"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => eliminarVacuna(vacuna)}
+                            className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                            title="Eliminar vacuna"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {/* Modal medicamento */}
+      {modalMedicamentoAbierto && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 px-4">
+          <div className="w-full max-w-2xl rounded-lg bg-white shadow-xl">
+            <form onSubmit={guardarMedicamento}>
+              <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">
+                    {editandoMedicamento
+                      ? "Editar medicamento"
+                      : "Nuevo medicamento"}
+                  </h2>
+                  <p className="text-sm text-gray-500">
+                    Completa la información del medicamento
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={cerrarModalMedicamento}
+                  className="p-2 hover:bg-gray-100 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-6 py-5">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    ID
+                  </label>
+
+                  <input
+                    type="text"
+                    value={formMedicamento.id || ""}
+                    disabled={Boolean(editandoMedicamento)}
+                    onChange={(event) =>
+                      setFormMedicamento((prev) => ({
+                        ...prev,
+                        id: event.target.value,
+                      }))
+                    }
+                    placeholder="MED001"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-gray-100"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Precio unitario
+                  </label>
+
+                  <input
+                    type="number"
+                    min="0"
+                    value={formMedicamento.precioUnitario}
+                    onChange={(event) =>
+                      setFormMedicamento((prev) => ({
+                        ...prev,
+                        precioUnitario: event.target.value,
+                      }))
+                    }
+                    placeholder="15000"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Nombre
+                  </label>
+
+                  <input
+                    type="text"
+                    value={formMedicamento.nombre}
+                    onChange={(event) =>
+                      setFormMedicamento((prev) => ({
+                        ...prev,
+                        nombre: event.target.value,
+                      }))
+                    }
+                    placeholder="Prednisolona"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Descripción
+                  </label>
+
+                  <textarea
+                    value={formMedicamento.descripcion || ""}
+                    onChange={(event) =>
+                      setFormMedicamento((prev) => ({
+                        ...prev,
+                        descripcion: event.target.value,
+                      }))
+                    }
+                    rows={3}
+                    placeholder="Antiinflamatorio corticoide"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-gray-200 px-6 py-4">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={cerrarModalMedicamento}
+                >
+                  Cancelar
+                </Button>
+
+                <Button type="submit" disabled={saving}>
+                  {saving ? "Guardando..." : "Guardar medicamento"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal vacuna */}
+      {modalVacunaAbierto && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 px-4">
+          <div className="w-full max-w-3xl rounded-lg bg-white shadow-xl">
+            <form onSubmit={guardarVacuna}>
+              <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">
+                    {editandoVacuna ? "Editar vacuna" : "Nueva vacuna"}
+                  </h2>
+                  <p className="text-sm text-gray-500">
+                    Completa la información de la vacuna
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={cerrarModalVacuna}
+                  className="p-2 hover:bg-gray-100 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-6 py-5">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    ID
+                  </label>
+
+                  <input
+                    type="text"
+                    value={formVacuna.id || ""}
+                    disabled={Boolean(editandoVacuna)}
+                    onChange={(event) =>
+                      setFormVacuna((prev) => ({
+                        ...prev,
+                        id: event.target.value,
+                      }))
+                    }
+                    placeholder="VAC001"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-gray-100"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Precio
+                  </label>
+
+                  <input
+                    type="number"
+                    min="0"
+                    value={formVacuna.precio}
+                    onChange={(event) =>
+                      setFormVacuna((prev) => ({
+                        ...prev,
+                        precio: event.target.value,
+                      }))
+                    }
+                    placeholder="18000"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Nombre
+                  </label>
+
+                  <input
+                    type="text"
+                    value={formVacuna.nombre}
+                    onChange={(event) =>
+                      setFormVacuna((prev) => ({
+                        ...prev,
+                        nombre: event.target.value,
+                      }))
+                    }
+                    placeholder="Sextuple Canina"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Laboratorio
+                  </label>
+
+                  <input
+                    type="text"
+                    value={formVacuna.laboratorio || ""}
+                    onChange={(event) =>
+                      setFormVacuna((prev) => ({
+                        ...prev,
+                        laboratorio: event.target.value,
+                      }))
+                    }
+                    placeholder="Zoetis"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Lote
+                  </label>
+
+                  <input
+                    type="text"
+                    value={formVacuna.lote || ""}
+                    onChange={(event) =>
+                      setFormVacuna((prev) => ({
+                        ...prev,
+                        lote: event.target.value,
+                      }))
+                    }
+                    placeholder="LOT-2026-001"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Fecha vencimiento
+                  </label>
+
+                  <input
+                    type="date"
+                    value={formVacuna.fechaVencimiento || ""}
+                    onChange={(event) =>
+                      setFormVacuna((prev) => ({
+                        ...prev,
+                        fechaVencimiento: event.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Especie objetivo
+                  </label>
+
+                  <input
+                    type="text"
+                    value={formVacuna.especieObjetivo || ""}
+                    onChange={(event) =>
+                      setFormVacuna((prev) => ({
+                        ...prev,
+                        especieObjetivo: event.target.value,
+                      }))
+                    }
+                    placeholder="Perro / Gato / Perro/Gato"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-gray-200 px-6 py-4">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={cerrarModalVacuna}
+                >
+                  Cancelar
+                </Button>
+
+                <Button type="submit" disabled={saving}>
+                  {saving ? "Guardando..." : "Guardar vacuna"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
