@@ -1,6 +1,89 @@
 const API_URL = "http://localhost:3000/api";
 
+export interface ApiMutationResponse {
+  ok?: boolean;
+  action?: "CREATED" | "UPDATED" | "DELETED" | string;
+  message: string;
+  id?: string;
+  filasAfectadas?: number;
+  valorTotal?: number;
+}
+
+/* ============================================================
+  TIPOS GENERALES
+============================================================ */
+
 export type EstadoCliente = "ACTIVO" | "INACTIVO" | "SUSPENDIDO";
+
+export type EstadoCita =
+  | "PROGRAMADA"
+  | "CONFIRMADA"
+  | "ATENDIDA"
+  | "CANCELADA"
+  | "REPROGRAMADA";
+
+export type SexoMascota = "M" | "H" | "" | null;
+
+export type TipoEmpleado = "VETERINARIO" | "RECEPCIONISTA";
+
+export type EstadoLaboral = "ACTIVO" | "INACTIVO" | "SUSPENDIDO";
+
+export type TurnoRecepcionista = "DIURNO" | "NOCTURNO";
+
+export type TipoServicio =
+  | "CONSULTA"
+  | "PROCEDIMIENTO"
+  | "TERAPIA"
+  | "VACUNACION"
+  | "PLAN_VACUNACION"
+  | "OTRO";
+
+export type EstadoPago = "PENDIENTE" | "PAGADA" | "ANULADA";
+
+export type TipoConceptoFactura =
+  | "CONSULTA"
+  | "MEDICAMENTO"
+  | "VACUNA"
+  | "PROCEDIMIENTO"
+  | "OTRO";
+
+/* ============================================================
+   REQUEST BASE
+============================================================ */
+
+async function request<T>(url: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_URL}${url}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options?.headers || {}),
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => null);
+
+    throw new Error(
+      errorData?.message ||
+        errorData?.error ||
+        `Error HTTP ${response.status}`
+    );
+  }
+
+  if (response.status === 204) {
+    return null as T;
+  }
+
+  return response.json();
+}
+
+function encodeId(id: string | number) {
+  return encodeURIComponent(String(id).trim());
+}
+
+/* ============================================================
+   CLIENTES
+============================================================ */
 
 export interface Cliente {
   id: string;
@@ -19,6 +102,38 @@ export interface ClienteInput {
   telefono?: string | null;
   estado: EstadoCliente;
 }
+
+export function getClientes() {
+  return request<Cliente[]>("/clientes");
+}
+
+export function getClienteById(id: string) {
+  return request<Cliente>(`/clientes/${encodeId(id)}`);
+}
+
+export function createCliente(cliente: ClienteInput) {
+  return request<ApiMutationResponse>("/clientes", {
+    method: "POST",
+    body: JSON.stringify(cliente),
+  });
+}
+
+export function updateCliente(id: string, cliente: ClienteInput) {
+  return request<ApiMutationResponse>(`/clientes/${encodeId(id)}`, {
+    method: "PUT",
+    body: JSON.stringify(cliente),
+  });
+}
+
+export function deleteCliente(id: string) {
+  return request<ApiMutationResponse>(`/clientes/${encodeId(id)}`, {
+    method: "DELETE",
+  });
+}
+
+/* ============================================================
+   MASCOTAS
+============================================================ */
 
 export interface Mascota {
   id: string;
@@ -39,103 +154,52 @@ export interface MascotaInput {
   clienteId: string;
   nombre: string;
   fechaNacimiento?: string | null;
-  sexo?: "M" | "H" | "" | null;
+  sexo?: SexoMascota;
   peso?: number | string | null;
   especie: string;
   raza?: string | null;
 }
 
-async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${url}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(options?.headers || {}),
-    },
-    ...options,
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => null);
-
-    throw new Error(
-      errorData?.message ||
-        errorData?.error ||
-        `Error HTTP ${response.status}`
-    );
-  }
-
-  return response.json();
-}
-
-// Clientes
-export function getClientes() {
-  return request<Cliente[]>("/clientes");
-}
-
-export function createCliente(cliente: ClienteInput) {
-  return request<{ message: string }>("/clientes", {
-    method: "POST",
-    body: JSON.stringify(cliente),
-  });
-}
-
-export function updateCliente(id: string, cliente: ClienteInput) {
-  return request<{ message: string }>(`/clientes/${id}`, {
-    method: "PUT",
-    body: JSON.stringify(cliente),
-  });
-}
-
-export function deleteCliente(id: string) {
-  return request<{ message: string }>(`/clientes/${id}`, {
-    method: "DELETE",
-  });
-}
-
-// Mascotas
 export function getMascotas() {
   return request<Mascota[]>("/mascotas");
 }
 
 export function createMascota(mascota: MascotaInput) {
-  return request<{ message: string }>("/mascotas", {
+  return request<ApiMutationResponse>("/mascotas", {
     method: "POST",
     body: JSON.stringify(mascota),
   });
 }
 
 export function updateMascota(id: string, mascota: MascotaInput) {
-  return request<{ message: string }>(`/mascotas/${id}`, {
+  return request<ApiMutationResponse>(`/mascotas/${encodeId(id)}`, {
     method: "PUT",
     body: JSON.stringify(mascota),
   });
 }
 
 export function deleteMascota(id: string) {
-  return request<{ message: string }>(`/mascotas/${id}`, {
+  return request<ApiMutationResponse>(`/mascotas/${encodeId(id)}`, {
     method: "DELETE",
   });
 }
 
-export type EstadoCita =
-  | "PROGRAMADA"
-  | "CONFIRMADA"
-  | "ATENDIDA"
-  | "CANCELADA"
-  | "REPROGRAMADA";
+/* ============================================================
+   CITAS
+============================================================ */
 
 export interface Cita {
   id: string;
   mascotaId: string;
-  mascotaNombre: string;
+  mascotaNombre?: string | null;
   mascotaEspecie?: string | null;
-  clienteId: string;
-  clienteNombre: string;
+  clienteId?: string | null;
+  clienteNombre?: string | null;
   clienteTelefono?: string | null;
   veterinarioId: string;
-  veterinarioNombre: string;
+  veterinarioNombre?: string | null;
   recepcionistaId: string;
-  recepcionistaNombre: string;
+  recepcionistaNombre?: string | null;
   fecha: string;
   hora: string;
   motivo?: string | null;
@@ -153,71 +217,63 @@ export interface CitaInput {
   estado: EstadoCita;
 }
 
-export interface CatalogoMascotaCita {
-  id: string;
-  nombre: string;
-  especie?: string | null;
-  clienteNombre?: string | null;
-}
-
-export interface CatalogoVeterinarioCita {
-  id: string;
-  nombre: string;
-  especialidad?: string | null;
-}
-
-export interface CatalogoRecepcionistaCita {
-  id: string;
-  nombre: string;
-  turno?: string | null;
-}
-
-export interface CatalogosCitas {
-  mascotas: CatalogoMascotaCita[];
-  veterinarios: CatalogoVeterinarioCita[];
-  recepcionistas: CatalogoRecepcionistaCita[];
+export interface CitasCatalogos {
+  mascotas: Array<{
+    id: string;
+    nombre: string;
+    especie: string;
+    clienteNombre?: string | null;
+  }>;
+  veterinarios: Array<{
+    id: string;
+    nombre: string;
+    especialidad?: string | null;
+  }>;
+  recepcionistas: Array<{
+    id: string;
+    nombre: string;
+    turno?: string | null;
+  }>;
 }
 
 export function getCitas() {
   return request<Cita[]>("/citas");
 }
 
-export function getCatalogosCitas() {
-  return request<CatalogosCitas>("/citas/catalogos");
+export function getCitasCatalogos() {
+  return request<CitasCatalogos>("/citas/catalogos");
 }
 
 export function createCita(cita: CitaInput) {
-  return request<{ message: string }>("/citas", {
+  return request<ApiMutationResponse>("/citas", {
     method: "POST",
     body: JSON.stringify(cita),
   });
 }
 
 export function updateCita(id: string, cita: CitaInput) {
-  return request<{ message: string }>(`/citas/${id}`, {
+  return request<ApiMutationResponse>(`/citas/${encodeId(id)}`, {
     method: "PUT",
     body: JSON.stringify(cita),
   });
 }
 
 export function deleteCita(id: string) {
-  return request<{ message: string }>(`/citas/${id}`, {
+  return request<ApiMutationResponse>(`/citas/${encodeId(id)}`, {
     method: "DELETE",
   });
 }
 
-
-
-export type TipoEmpleado = "VETERINARIO" | "RECEPCIONISTA";
-export type EstadoLaboralEmpleado = "ACTIVO" | "INACTIVO" | "SUSPENDIDO";
-export type TurnoRecepcionista = "DIURNO" | "NOCTURNO";
+/* ============================================================
+   EMPLEADOS
+============================================================ */
 
 export interface Empleado {
   id: string;
   nombre: string;
   telefono?: string | null;
   fechaIngreso: string;
-  estadoLaboral: EstadoLaboralEmpleado;
+  estadoLaboral: EstadoLaboral;
   tipoEmpleado: TipoEmpleado;
   salario: number;
   especialidad?: string | null;
@@ -230,77 +286,49 @@ export interface EmpleadoInput {
   nombre: string;
   telefono?: string | null;
   fechaIngreso: string;
-  estadoLaboral: EstadoLaboralEmpleado;
+  estadoLaboral: EstadoLaboral;
   tipoEmpleado: TipoEmpleado;
   salario: number | string;
   especialidad?: string | null;
   nroMatricula?: string | null;
-  turno?: TurnoRecepcionista | "" | null;
-}
-
-export interface VeterinarioCatalogo {
-  id: string;
-  nombre: string;
-  telefono?: string | null;
-  fechaIngreso?: string | null;
-  estadoLaboral?: EstadoLaboralEmpleado;
-  salario?: number | null;
-  especialidad?: string | null;
-  nroMatricula?: string | null;
-}
-
-export interface RecepcionistaCatalogo {
-  id: string;
-  nombre: string;
-  telefono?: string | null;
-  fechaIngreso?: string | null;
-  estadoLaboral?: EstadoLaboralEmpleado;
-  salario?: number | null;
   turno?: TurnoRecepcionista | null;
 }
 
-// Empleados
 export function getEmpleados() {
   return request<Empleado[]>("/empleados");
 }
 
 export function getVeterinarios() {
-  return request<VeterinarioCatalogo[]>("/empleados/veterinarios");
+  return request<Empleado[]>("/empleados/veterinarios");
 }
 
 export function getRecepcionistas() {
-  return request<RecepcionistaCatalogo[]>("/empleados/recepcionistas");
+  return request<Empleado[]>("/empleados/recepcionistas");
 }
 
 export function createEmpleado(empleado: EmpleadoInput) {
-  return request<{ message: string }>("/empleados", {
+  return request<ApiMutationResponse>("/empleados", {
     method: "POST",
     body: JSON.stringify(empleado),
   });
 }
 
 export function updateEmpleado(id: string, empleado: EmpleadoInput) {
-  return request<{ message: string }>(`/empleados/${id}`, {
+  return request<ApiMutationResponse>(`/empleados/${encodeId(id)}`, {
     method: "PUT",
     body: JSON.stringify(empleado),
   });
 }
 
 export function deleteEmpleado(id: string) {
-  return request<{ message: string }>(`/empleados/${id}`, {
+  return request<ApiMutationResponse>(`/empleados/${encodeId(id)}`, {
     method: "DELETE",
   });
 }
 
-export type TipoServicio =
-  | "CONSULTA"
-  | "PROCEDIMIENTO"
-  | "TERAPIA"
-  | "VACUNACION"
-  | "PLAN_VACUNACION"
-  | "OTRO";
-
-export type ActivoServicio = "S" | "N";
+/* ============================================================
+   SERVICIOS
+============================================================ */
 
 export interface Servicio {
   id: string;
@@ -308,7 +336,7 @@ export interface Servicio {
   tipoServicio: TipoServicio;
   precio: number;
   descripcion?: string | null;
-  activo: ActivoServicio;
+  activo: "S" | "N";
 }
 
 export interface ServicioInput {
@@ -317,8 +345,37 @@ export interface ServicioInput {
   tipoServicio: TipoServicio;
   precio: number | string;
   descripcion?: string | null;
-  activo: ActivoServicio;
+  activo: "S" | "N";
 }
+
+export function getServicios(soloActivos = false) {
+  const query = soloActivos ? "?activos=true" : "";
+  return request<Servicio[]>(`/servicios${query}`);
+}
+
+export function createServicio(servicio: ServicioInput) {
+  return request<ApiMutationResponse>("/servicios", {
+    method: "POST",
+    body: JSON.stringify(servicio),
+  });
+}
+
+export function updateServicio(id: string, servicio: ServicioInput) {
+  return request<ApiMutationResponse>(`/servicios/${encodeId(id)}`, {
+    method: "PUT",
+    body: JSON.stringify(servicio),
+  });
+}
+
+export function deleteServicio(id: string) {
+  return request<ApiMutationResponse>(`/servicios/${encodeId(id)}`, {
+    method: "DELETE",
+  });
+}
+
+/* ============================================================
+   MEDICAMENTOS
+============================================================ */
 
 export interface Medicamento {
   id: string;
@@ -334,57 +391,33 @@ export interface MedicamentoInput {
   precioUnitario: number | string;
 }
 
-// Servicios
-export function getServicios(soloActivos = false) {
-  return request<Servicio[]>(
-    soloActivos ? "/servicios?activos=true" : "/servicios"
-  );
-}
-
-export function createServicio(servicio: ServicioInput) {
-  return request<{ message: string }>("/servicios", {
-    method: "POST",
-    body: JSON.stringify(servicio),
-  });
-}
-
-export function updateServicio(id: string, servicio: ServicioInput) {
-  return request<{ message: string }>(`/servicios/${id}`, {
-    method: "PUT",
-    body: JSON.stringify(servicio),
-  });
-}
-
-export function deleteServicio(id: string) {
-  return request<{ message: string }>(`/servicios/${id}`, {
-    method: "DELETE",
-  });
-}
-
-// Medicamentos
 export function getMedicamentos() {
   return request<Medicamento[]>("/medicamentos");
 }
 
 export function createMedicamento(medicamento: MedicamentoInput) {
-  return request<{ message: string }>("/medicamentos", {
+  return request<ApiMutationResponse>("/medicamentos", {
     method: "POST",
     body: JSON.stringify(medicamento),
   });
 }
 
 export function updateMedicamento(id: string, medicamento: MedicamentoInput) {
-  return request<{ message: string }>(`/medicamentos/${id}`, {
+  return request<ApiMutationResponse>(`/medicamentos/${encodeId(id)}`, {
     method: "PUT",
     body: JSON.stringify(medicamento),
   });
 }
 
 export function deleteMedicamento(id: string) {
-  return request<{ message: string }>(`/medicamentos/${id}`, {
+  return request<ApiMutationResponse>(`/medicamentos/${encodeId(id)}`, {
     method: "DELETE",
   });
 }
+
+/* ============================================================
+   VACUNAS
+============================================================ */
 
 export interface Vacuna {
   id: string;
@@ -406,29 +439,21 @@ export interface VacunaInput {
   precio: number | string;
 }
 
-export interface MascotaCatalogoVacuna {
-  id: string;
-  nombre: string;
-  especie: string;
-  clienteId: string;
-  clienteNombre: string;
-}
-
 export interface AplicacionVacuna {
   id: string;
   codigoMascota: string;
   idVacuna: string;
   fechaAplicacion: string;
   observacion?: string | null;
-  mascotaNombre: string;
-  mascotaEspecie: string;
-  clienteId: string;
-  clienteNombre: string;
-  vacunaNombre: string;
+  mascotaNombre?: string | null;
+  mascotaEspecie?: string | null;
+  clienteId?: string | null;
+  clienteNombre?: string | null;
+  vacunaNombre?: string | null;
   laboratorio?: string | null;
   lote?: string | null;
   especieObjetivo?: string | null;
-  precio: number;
+  precio?: number | null;
 }
 
 export interface AplicacionVacunaInput {
@@ -439,69 +464,77 @@ export interface AplicacionVacunaInput {
 }
 
 export interface VacunasCatalogos {
-  mascotas: MascotaCatalogoVacuna[];
+  mascotas: Array<{
+    id: string;
+    nombre: string;
+    especie: string;
+    clienteId: string;
+    clienteNombre: string;
+  }>;
   vacunas: Vacuna[];
 }
 
-// Vacunas
 export function getVacunas() {
   return request<Vacuna[]>("/vacunas");
-}
-
-export function createVacuna(vacuna: VacunaInput) {
-  return request<{ message: string }>("/vacunas", {
-    method: "POST",
-    body: JSON.stringify(vacuna),
-  });
-}
-
-export function updateVacuna(id: string, vacuna: VacunaInput) {
-  return request<{ message: string }>(`/vacunas/${id}`, {
-    method: "PUT",
-    body: JSON.stringify(vacuna),
-  });
-}
-
-export function deleteVacuna(id: string) {
-  return request<{ message: string }>(`/vacunas/${id}`, {
-    method: "DELETE",
-  });
 }
 
 export function getVacunasCatalogos() {
   return request<VacunasCatalogos>("/vacunas/catalogos");
 }
 
-// Aplicaciones de vacunas
+export function createVacuna(vacuna: VacunaInput) {
+  return request<ApiMutationResponse>("/vacunas", {
+    method: "POST",
+    body: JSON.stringify(vacuna),
+  });
+}
+
+export function updateVacuna(id: string, vacuna: VacunaInput) {
+  return request<ApiMutationResponse>(`/vacunas/${encodeId(id)}`, {
+    method: "PUT",
+    body: JSON.stringify(vacuna),
+  });
+}
+
+export function deleteVacuna(id: string) {
+  return request<ApiMutationResponse>(`/vacunas/${encodeId(id)}`, {
+    method: "DELETE",
+  });
+}
+
 export function getAplicacionesVacunas() {
   return request<AplicacionVacuna[]>("/vacunas/aplicaciones");
 }
 
 export function createAplicacionVacuna(aplicacion: AplicacionVacunaInput) {
-  return request<{ message: string }>("/vacunas/aplicaciones", {
+  return request<ApiMutationResponse>("/vacunas/aplicaciones", {
     method: "POST",
     body: JSON.stringify(aplicacion),
   });
 }
 
 export function updateAplicacionVacuna(aplicacion: AplicacionVacunaInput) {
-  return request<{ message: string }>("/vacunas/aplicaciones", {
+  return request<ApiMutationResponse>("/vacunas/aplicaciones", {
     method: "PUT",
     body: JSON.stringify(aplicacion),
   });
 }
 
 export function deleteAplicacionVacuna(aplicacion: AplicacionVacunaInput) {
-  const params = new URLSearchParams({
-    codigoMascota: aplicacion.codigoMascota,
-    idVacuna: aplicacion.idVacuna,
-    fechaAplicacion: aplicacion.fechaAplicacion,
-  });
+  const params = new URLSearchParams();
 
-  return request<{ message: string }>(`/vacunas/aplicaciones?${params}`, {
+  params.set("codigoMascota", aplicacion.codigoMascota);
+  params.set("idVacuna", aplicacion.idVacuna);
+  params.set("fechaAplicacion", aplicacion.fechaAplicacion);
+
+  return request<ApiMutationResponse>(`/vacunas/aplicaciones?${params.toString()}`, {
     method: "DELETE",
   });
 }
+
+/* ============================================================
+   CONSULTAS VETERINARIAS
+============================================================ */
 
 export interface Consulta {
   id: string;
@@ -513,29 +546,29 @@ export interface Consulta {
   recomendaciones?: string | null;
   fechaAtencionReal: string;
 
-  citaFecha: string;
-  citaHora: string;
-  citaEstado: string;
+  citaFecha?: string | null;
+  citaHora?: string | null;
   motivo?: string | null;
+  citaEstado?: string | null;
 
-  mascotaId: string;
-  mascotaNombre: string;
-  mascotaEspecie: string;
+  mascotaId?: string | null;
+  mascotaNombre?: string | null;
+  mascotaEspecie?: string | null;
 
-  clienteId: string;
-  clienteNombre: string;
+  clienteId?: string | null;
+  clienteNombre?: string | null;
   clienteTelefono?: string | null;
 
-  veterinarioId: string;
-  veterinarioNombre: string;
+  veterinarioId?: string | null;
+  veterinarioNombre?: string | null;
 
-  servicioNombre: string;
-  servicioTipo: string;
-  servicioPrecio: number;
+  servicioNombre?: string | null;
+  servicioTipo?: string | null;
+  servicioPrecio?: number | null;
 }
 
 export interface ConsultaInput {
-  id?: string;
+  id?: string | null;
   idCita: string;
   idServicio: string;
   temperatura?: number | string | null;
@@ -545,81 +578,42 @@ export interface ConsultaInput {
   fechaAtencionReal: string;
 }
 
-export interface CatalogoConsultaCita {
-  id: string;
-  fecha: string;
-  hora: string;
-  motivo?: string | null;
-  estado: string;
-
-  mascotaId: string;
-  mascotaNombre: string;
-  mascotaEspecie: string;
-
-  clienteId: string;
-  clienteNombre: string;
-  clienteTelefono?: string | null;
-
-  veterinarioId: string;
-  veterinarioNombre: string;
-}
-
-export interface CatalogoConsultaServicio {
-  id: string;
-  nombre: string;
-  tipoServicio: string;
-  precio: number;
-  descripcion?: string | null;
-  activo: "S" | "N";
-}
-
-export interface CatalogosConsultas {
-  citasDisponibles: CatalogoConsultaCita[];
-  servicios: CatalogoConsultaServicio[];
+export interface ConsultasCatalogos {
+  citasDisponibles: Cita[];
+  servicios: Servicio[];
 }
 
 export function getConsultas() {
   return request<Consulta[]>("/consultas");
 }
 
-export function getCatalogosConsultas() {
-  return request<CatalogosConsultas>("/consultas/catalogos");
+export function getConsultasCatalogos() {
+  return request<ConsultasCatalogos>("/consultas/catalogos");
 }
 
 export function createConsulta(consulta: ConsultaInput) {
-  return request<{ message: string; id: string }>("/consultas", {
+  return request<ApiMutationResponse>("/consultas", {
     method: "POST",
     body: JSON.stringify(consulta),
   });
 }
 
 export function updateConsulta(id: string, consulta: ConsultaInput) {
-  return request<{ message: string }>(`/consultas/${id}`, {
+  return request<ApiMutationResponse>(`/consultas/${encodeId(id)}`, {
     method: "PUT",
     body: JSON.stringify(consulta),
   });
 }
 
 export function deleteConsulta(id: string) {
-  return request<{ message: string }>(`/consultas/${id}`, {
+  return request<ApiMutationResponse>(`/consultas/${encodeId(id)}`, {
     method: "DELETE",
   });
 }
 
-export type EstadoDiagnostico = "PRESUNTIVO" | "CONFIRMADO" | "DESCARTADO";
-
-export type TipoTratamiento =
-  | "MEDICACION"
-  | "OBSERVACION"
-  | "TERAPIA"
-  | "PROCEDIMIENTO_AMBULATORIO"
-  | "PLAN_VACUNACION";
-
-export type EstadoTratamiento =
-  | "ACTIVO"
-  | "FINALIZADO"
-  | "SUSPENDIDO"
-  | "CANCELADO";
+/* ============================================================
+   DIAGNÓSTICOS
+============================================================ */
 
 export interface Diagnostico {
   id: string;
@@ -627,140 +621,114 @@ export interface Diagnostico {
   descripcionCondicion: string;
   nivelGravedad?: string | null;
   tipoAfeccion?: string | null;
-  estado: EstadoDiagnostico;
+  estado: "PRESUNTIVO" | "CONFIRMADO" | "DESCARTADO" | string;
 
-  fechaAtencionReal: string;
-  idCita: string;
+  fechaAtencionReal?: string | null;
+  idCita?: string | null;
   motivoConsulta?: string | null;
 
-  mascotaId: string;
-  mascotaNombre: string;
-  mascotaEspecie: string;
+  mascotaId?: string | null;
+  mascotaNombre?: string | null;
+  mascotaEspecie?: string | null;
 
-  clienteId: string;
-  clienteNombre: string;
+  clienteId?: string | null;
+  clienteNombre?: string | null;
 
-  veterinarioId: string;
-  veterinarioNombre: string;
+  veterinarioId?: string | null;
+  veterinarioNombre?: string | null;
 
-  servicioNombre: string;
-  tratamientosCount: number;
+  servicioNombre?: string | null;
+  tratamientosCount?: number;
 }
 
 export interface DiagnosticoInput {
-  id?: string;
+  id?: string | null;
   idConsulta: string;
   descripcionCondicion: string;
   nivelGravedad?: string | null;
   tipoAfeccion?: string | null;
-  estado: EstadoDiagnostico;
+  estado: "PRESUNTIVO" | "CONFIRMADO" | "DESCARTADO" | string;
 }
 
-export interface CatalogoDiagnosticoConsulta {
-  id: string;
-  idCita: string;
-  fechaAtencionReal: string;
-  observaciones?: string | null;
-  recomendaciones?: string | null;
-  mascotaNombre: string;
-  mascotaEspecie: string;
-  clienteNombre: string;
-  veterinarioNombre: string;
-  servicioNombre: string;
+export interface DiagnosticosCatalogos {
+  consultas: Consulta[];
 }
 
-export interface CatalogosDiagnosticos {
-  consultas: CatalogoDiagnosticoConsulta[];
+export function getDiagnosticos() {
+  return request<Diagnostico[]>("/diagnosticos");
 }
 
-export interface CatalogoTratamientoDiagnostico {
-  id: string;
-  idConsulta: string;
-  descripcionCondicion: string;
-  nivelGravedad?: string | null;
-  tipoAfeccion?: string | null;
-  estado: EstadoDiagnostico;
-  fechaAtencionReal: string;
-  mascotaNombre: string;
-  mascotaEspecie: string;
-  clienteNombre: string;
-  veterinarioConsultaNombre: string;
+export function getDiagnosticosCatalogos() {
+  return request<DiagnosticosCatalogos>("/diagnosticos/catalogos");
 }
 
-export interface CatalogoTratamientoVeterinario {
-  id: string;
-  nombre: string;
-  telefono?: string | null;
-  especialidad?: string | null;
-  nroMatricula?: string | null;
+export function createDiagnostico(diagnostico: DiagnosticoInput) {
+  return request<ApiMutationResponse>("/diagnosticos", {
+    method: "POST",
+    body: JSON.stringify(diagnostico),
+  });
 }
 
-export interface CatalogoTratamientoServicio {
-  id: string;
-  nombre: string;
-  tipoServicio: string;
-  precio: number;
-  descripcion?: string | null;
-  activo: "S" | "N";
+export function updateDiagnostico(id: string, diagnostico: DiagnosticoInput) {
+  return request<ApiMutationResponse>(`/diagnosticos/${encodeId(id)}`, {
+    method: "PUT",
+    body: JSON.stringify(diagnostico),
+  });
 }
 
-export interface CatalogoTratamientoMedicamento {
-  id: string;
-  nombre: string;
-  descripcion?: string | null;
-  precioUnitario: number;
+export function deleteDiagnostico(id: string) {
+  return request<ApiMutationResponse>(`/diagnosticos/${encodeId(id)}`, {
+    method: "DELETE",
+  });
 }
 
-export interface CatalogosTratamientos {
-  diagnosticos: CatalogoTratamientoDiagnostico[];
-  veterinarios: CatalogoTratamientoVeterinario[];
-  servicios: CatalogoTratamientoServicio[];
-  medicamentos: CatalogoTratamientoMedicamento[];
-}
+/* ============================================================
+   TRATAMIENTOS
+============================================================ */
 
 export interface Tratamiento {
   id: string;
   idDiagnostico: string;
   idVeterinario: string;
   idServicio?: string | null;
-  tipo: TipoTratamiento;
+  tipo: string;
   fechaInicio: string;
   fechaFinEstimada?: string | null;
   indicaciones?: string | null;
-  estado?: EstadoTratamiento | null;
+  estado?: string | null;
 
-  descripcionCondicion: string;
+  descripcionCondicion?: string | null;
   nivelGravedad?: string | null;
   tipoAfeccion?: string | null;
-  diagnosticoEstado: EstadoDiagnostico;
+  diagnosticoEstado?: string | null;
 
-  idConsulta: string;
-  fechaAtencionReal: string;
+  idConsulta?: string | null;
+  fechaAtencionReal?: string | null;
 
-  mascotaNombre: string;
-  mascotaEspecie: string;
-  clienteNombre: string;
+  mascotaNombre?: string | null;
+  mascotaEspecie?: string | null;
+  clienteNombre?: string | null;
 
-  veterinarioNombre: string;
+  veterinarioNombre?: string | null;
 
   servicioNombre?: string | null;
   servicioTipo?: string | null;
   servicioPrecio?: number | null;
 
-  medicamentosCount: number;
+  medicamentosCount?: number;
   medicamentos?: string | null;
 }
 
 export interface TratamientoInput {
-  id?: string;
+  id?: string | null;
   idDiagnostico: string;
   idVeterinario: string;
   idServicio?: string | null;
-  tipo: TipoTratamiento;
+  tipo: string;
   fechaInicio: string;
   fechaFinEstimada?: string | null;
   indicaciones?: string | null;
-  estado?: EstadoTratamiento | null;
+  estado?: string | null;
 }
 
 export interface TratamientoMedicamento {
@@ -770,9 +738,9 @@ export interface TratamientoMedicamento {
   frecuencia: string;
   viaAdministracion?: string | null;
   duracion?: string | null;
-  medicamentoNombre: string;
+  medicamentoNombre?: string | null;
   medicamentoDescripcion?: string | null;
-  precioUnitario: number;
+  precioUnitario?: number | null;
 }
 
 export interface TratamientoMedicamentoInput {
@@ -783,74 +751,53 @@ export interface TratamientoMedicamentoInput {
   duracion?: string | null;
 }
 
-export function getDiagnosticos() {
-  return request<Diagnostico[]>("/diagnosticos");
-}
-
-export function getCatalogosDiagnosticos() {
-  return request<CatalogosDiagnosticos>("/diagnosticos/catalogos");
-}
-
-export function createDiagnostico(diagnostico: DiagnosticoInput) {
-  return request<{ message: string; id: string }>("/diagnosticos", {
-    method: "POST",
-    body: JSON.stringify(diagnostico),
-  });
-}
-
-export function updateDiagnostico(id: string, diagnostico: DiagnosticoInput) {
-  return request<{ message: string }>(`/diagnosticos/${id}`, {
-    method: "PUT",
-    body: JSON.stringify(diagnostico),
-  });
-}
-
-export function deleteDiagnostico(id: string) {
-  return request<{ message: string }>(`/diagnosticos/${id}`, {
-    method: "DELETE",
-  });
+export interface TratamientosCatalogos {
+  diagnosticos: Diagnostico[];
+  veterinarios: Empleado[];
+  servicios: Servicio[];
+  medicamentos: Medicamento[];
 }
 
 export function getTratamientos() {
   return request<Tratamiento[]>("/tratamientos");
 }
 
-export function getCatalogosTratamientos() {
-  return request<CatalogosTratamientos>("/tratamientos/catalogos");
+export function getTratamientosCatalogos() {
+  return request<TratamientosCatalogos>("/tratamientos/catalogos");
 }
 
 export function createTratamiento(tratamiento: TratamientoInput) {
-  return request<{ message: string; id: string }>("/tratamientos", {
+  return request<ApiMutationResponse>("/tratamientos", {
     method: "POST",
     body: JSON.stringify(tratamiento),
   });
 }
 
 export function updateTratamiento(id: string, tratamiento: TratamientoInput) {
-  return request<{ message: string }>(`/tratamientos/${id}`, {
+  return request<ApiMutationResponse>(`/tratamientos/${encodeId(id)}`, {
     method: "PUT",
     body: JSON.stringify(tratamiento),
   });
 }
 
 export function deleteTratamiento(id: string) {
-  return request<{ message: string }>(`/tratamientos/${id}`, {
+  return request<ApiMutationResponse>(`/tratamientos/${encodeId(id)}`, {
     method: "DELETE",
   });
 }
 
-export function getTratamientoMedicamentos(idTratamiento: string) {
+export function getMedicamentosTratamiento(idTratamiento: string) {
   return request<TratamientoMedicamento[]>(
-    `/tratamientos/${encodeURIComponent(idTratamiento)}/medicamentos`
+    `/tratamientos/${encodeId(idTratamiento)}/medicamentos`
   );
 }
 
-export function addTratamientoMedicamento(
+export function addMedicamentoTratamiento(
   idTratamiento: string,
   medicamento: TratamientoMedicamentoInput
 ) {
-  return request<{ message: string }>(
-    `/tratamientos/${encodeURIComponent(idTratamiento)}/medicamentos`,
+  return request<ApiMutationResponse>(
+    `/tratamientos/${encodeId(idTratamiento)}/medicamentos`,
     {
       method: "POST",
       body: JSON.stringify(medicamento),
@@ -858,13 +805,13 @@ export function addTratamientoMedicamento(
   );
 }
 
-export function updateTratamientoMedicamento(
+export function updateMedicamentoTratamiento(
   idTratamiento: string,
   idMedicamento: string,
-  medicamento: Omit<TratamientoMedicamentoInput, "idMedicamento">
+  medicamento: TratamientoMedicamentoInput
 ) {
-  return request<{ message: string }>(
-    `/tratamientos/${encodeURIComponent(idTratamiento)}/medicamentos/${encodeURIComponent(
+  return request<ApiMutationResponse>(
+    `/tratamientos/${encodeId(idTratamiento)}/medicamentos/${encodeId(
       idMedicamento
     )}`,
     {
@@ -874,12 +821,12 @@ export function updateTratamientoMedicamento(
   );
 }
 
-export function deleteTratamientoMedicamento(
+export function deleteMedicamentoTratamiento(
   idTratamiento: string,
   idMedicamento: string
 ) {
-  return request<{ message: string }>(
-    `/tratamientos/${encodeURIComponent(idTratamiento)}/medicamentos/${encodeURIComponent(
+  return request<ApiMutationResponse>(
+    `/tratamientos/${encodeId(idTratamiento)}/medicamentos/${encodeId(
       idMedicamento
     )}`,
     {
@@ -888,14 +835,9 @@ export function deleteTratamientoMedicamento(
   );
 }
 
-export type EstadoPago = "PENDIENTE" | "PAGADA" | "ANULADA";
-
-export type TipoConceptoFactura =
-  | "CONSULTA"
-  | "MEDICAMENTO"
-  | "VACUNA"
-  | "PROCEDIMIENTO"
-  | "OTRO";
+/* ============================================================
+   FACTURACIÓN
+============================================================ */
 
 export interface Factura {
   id: string;
@@ -906,27 +848,27 @@ export interface Factura {
   metodoPago?: string | null;
   estadoPago: EstadoPago;
 
-  clienteNombre: string;
+  clienteNombre?: string | null;
   clienteTelefono?: string | null;
   clienteEmail?: string | null;
 
-  idCita: string;
-  fechaAtencionReal: string;
+  idCita?: string | null;
+  fechaAtencionReal?: string | null;
 
-  mascotaId: string;
-  mascotaNombre: string;
-  mascotaEspecie: string;
+  mascotaId?: string | null;
+  mascotaNombre?: string | null;
+  mascotaEspecie?: string | null;
 
-  servicioNombre: string;
-  servicioTipo: string;
-  servicioPrecio: number;
+  servicioNombre?: string | null;
+  servicioTipo?: string | null;
+  servicioPrecio?: number | null;
 
-  detallesCount: number;
-  totalCalculado: number;
+  detallesCount?: number;
+  totalCalculado?: number;
 }
 
 export interface FacturaInput {
-  id?: string;
+  id?: string | null;
   idConsulta: string;
   fecha: string;
   metodoPago?: string | null;
@@ -934,7 +876,7 @@ export interface FacturaInput {
   crearDetalleConsulta?: boolean;
 }
 
-export interface FacturaDetalle {
+export interface DetalleFactura {
   id: string;
   idFactura: string;
   descripcion: string;
@@ -944,77 +886,56 @@ export interface FacturaDetalle {
   subtotal: number;
 }
 
-export interface FacturaDetalleInput {
-  id?: string;
+export interface DetalleFacturaInput {
+  id?: string | null;
   descripcion: string;
   tipoConcepto: TipoConceptoFactura;
   cantidad: number | string;
   precioUnitario: number | string;
 }
 
-export interface CatalogoFacturaConsulta {
-  id: string;
-  idCita: string;
-  fechaAtencionReal: string;
-  clienteId: string;
-  clienteNombre: string;
-  clienteTelefono?: string | null;
-  mascotaId: string;
-  mascotaNombre: string;
-  mascotaEspecie: string;
-  servicioId: string;
-  servicioNombre: string;
-  servicioTipo: string;
-  servicioPrecio: number;
-}
-
-export interface CatalogosFacturas {
-  consultasDisponibles: CatalogoFacturaConsulta[];
+export interface FacturasCatalogos {
+  consultasDisponibles: Consulta[];
 }
 
 export function getFacturas() {
   return request<Factura[]>("/facturas");
 }
 
-export function getCatalogosFacturas() {
-  return request<CatalogosFacturas>("/facturas/catalogos");
+export function getFacturasCatalogos() {
+  return request<FacturasCatalogos>("/facturas/catalogos");
 }
 
 export function createFactura(factura: FacturaInput) {
-  return request<{ message: string; id: string; valorTotal: number }>(
-    "/facturas",
-    {
-      method: "POST",
-      body: JSON.stringify(factura),
-    }
-  );
+  return request<ApiMutationResponse>("/facturas", {
+    method: "POST",
+    body: JSON.stringify(factura),
+  });
 }
 
 export function updateFactura(id: string, factura: FacturaInput) {
-  return request<{ message: string; valorTotal: number }>(`/facturas/${id}`, {
+  return request<ApiMutationResponse>(`/facturas/${encodeId(id)}`, {
     method: "PUT",
     body: JSON.stringify(factura),
   });
 }
 
 export function deleteFactura(id: string) {
-  return request<{ message: string }>(`/facturas/${id}`, {
+  return request<ApiMutationResponse>(`/facturas/${encodeId(id)}`, {
     method: "DELETE",
   });
 }
 
-export function getFacturaDetalles(idFactura: string) {
-  return request<FacturaDetalle[]>(
-    `/facturas/${encodeURIComponent(idFactura)}/detalles`
-  );
+export function getDetallesFactura(idFactura: string) {
+  return request<DetalleFactura[]>(`/facturas/${encodeId(idFactura)}/detalles`);
 }
 
-export function createFacturaDetalle(
+export function createDetalleFactura(
   idFactura: string,
-  detalle: FacturaDetalleInput
+  detalle: DetalleFacturaInput
 ) {
-  return request<{ message: string; id: string; valorTotal: number }>(
-    `/facturas/${encodeURIComponent(idFactura)}/detalles`,
+  return request<ApiMutationResponse>(
+    `/facturas/${encodeId(idFactura)}/detalles`,
     {
       method: "POST",
       body: JSON.stringify(detalle),
@@ -1022,15 +943,13 @@ export function createFacturaDetalle(
   );
 }
 
-export function updateFacturaDetalle(
+export function updateDetalleFactura(
   idFactura: string,
   idDetalle: string,
-  detalle: FacturaDetalleInput
+  detalle: DetalleFacturaInput
 ) {
-  return request<{ message: string; valorTotal: number }>(
-    `/facturas/${encodeURIComponent(idFactura)}/detalles/${encodeURIComponent(
-      idDetalle
-    )}`,
+  return request<ApiMutationResponse>(
+    `/facturas/${encodeId(idFactura)}/detalles/${encodeId(idDetalle)}`,
     {
       method: "PUT",
       body: JSON.stringify(detalle),
@@ -1038,11 +957,9 @@ export function updateFacturaDetalle(
   );
 }
 
-export function deleteFacturaDetalle(idFactura: string, idDetalle: string) {
-  return request<{ message: string; valorTotal: number }>(
-    `/facturas/${encodeURIComponent(idFactura)}/detalles/${encodeURIComponent(
-      idDetalle
-    )}`,
+export function deleteDetalleFactura(idFactura: string, idDetalle: string) {
+  return request<ApiMutationResponse>(
+    `/facturas/${encodeId(idFactura)}/detalles/${encodeId(idDetalle)}`,
     {
       method: "DELETE",
     }
@@ -1050,13 +967,17 @@ export function deleteFacturaDetalle(idFactura: string, idDetalle: string) {
 }
 
 export function recalcularFactura(idFactura: string) {
-  return request<{ message: string; valorTotal: number }>(
-    `/facturas/${encodeURIComponent(idFactura)}/recalcular`,
+  return request<ApiMutationResponse>(
+    `/facturas/${encodeId(idFactura)}/recalcular`,
     {
       method: "POST",
     }
   );
 }
+
+/* ============================================================
+   DASHBOARD
+============================================================ */
 
 export interface DashboardResumen {
   totalClientes: number;
@@ -1074,38 +995,12 @@ export interface DashboardResumen {
   vacunasMes: number;
 }
 
-export interface DashboardCitaHoy {
-  id: string;
-  fecha: string;
-  hora: string;
-  motivo?: string | null;
-  estado: string;
-
-  mascotaId: string;
-  mascotaNombre: string;
-  mascotaEspecie: string;
-
-  clienteId: string;
-  clienteNombre: string;
-  clienteTelefono?: string | null;
-
-  veterinarioId: string;
-  veterinarioNombre: string;
-}
-
-export type DashboardActividadTipo =
-  | "CITA"
-  | "CONSULTA"
-  | "FACTURA"
-  | "VACUNA"
-  | "TRATAMIENTO";
-
-export interface DashboardActividad {
-  tipo: DashboardActividadTipo;
+export interface ActividadReciente {
+  tipo: string;
   id: string;
   titulo: string;
-  descripcion: string;
-  fecha: string;
+  descripcion?: string | null;
+  fecha?: string | null;
   hora?: string | null;
   estado?: string | null;
 }
@@ -1115,14 +1010,18 @@ export function getDashboardResumen() {
 }
 
 export function getDashboardCitasHoy() {
-  return request<DashboardCitaHoy[]>("/dashboard/citas-hoy");
+  return request<Cita[]>("/dashboard/citas-hoy");
 }
 
 export function getDashboardActividadReciente(limite = 10) {
-  return request<DashboardActividad[]>(
+  return request<ActividadReciente[]>(
     `/dashboard/actividad-reciente?limite=${limite}`
   );
 }
+
+/* ============================================================
+   REPORTES
+============================================================ */
 
 export interface ReporteIngresoMensual {
   mesNumero: number;
@@ -1259,3 +1158,44 @@ export function getReporteTopServicios(top = 5) {
 export function getReporteResumenClientes() {
   return request<ReporteResumenCliente[]>("/reportes/resumen-clientes");
 }
+
+/* ============================================================
+   COMPATIBILIDAD CON PANTALLAS EXISTENTES
+============================================================ */
+
+export type EstadoDiagnostico = "PRESUNTIVO" | "CONFIRMADO" | "DESCARTADO";
+
+export type EstadoTratamiento =
+  | "ACTIVO"
+  | "FINALIZADO"
+  | "SUSPENDIDO"
+  | "CANCELADO";
+
+export type TipoTratamiento =
+  | "MEDICACION"
+  | "OBSERVACION"
+  | "TERAPIA"
+  | "PROCEDIMIENTO_AMBULATORIO"
+  | "PLAN_VACUNACION";
+
+export type CatalogoConsultaCita = Cita;
+
+export type CatalogosConsultas = ConsultasCatalogos;
+
+export type CatalogosTratamientos = TratamientosCatalogos;
+
+export const getCatalogosConsultas = getConsultasCatalogos;
+
+export const getCatalogosTratamientos = getTratamientosCatalogos;
+
+export type CatalogosCitas = CitasCatalogos;
+
+export const getCatalogosCitas = getCitasCatalogos;
+
+export type DashboardCitaHoy = Cita;
+
+export type EstadoLaboralEmpleado = EstadoLaboral;
+
+export const getTratamientoMedicamentos = getMedicamentosTratamiento;
+
+export const addTratamientoMedicamento = addMedicamentoTratamiento;

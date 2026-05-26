@@ -85,6 +85,7 @@ export function Clientes() {
   const [loading, setLoading] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [modalAbierto, setModalAbierto] = useState(false);
   const [editando, setEditando] = useState<Cliente | null>(null);
   const [form, setForm] = useState<ClienteInput>(estadoInicial);
@@ -93,6 +94,7 @@ export function Clientes() {
     try {
       setLoading(true);
       setError("");
+      setSuccess("");
 
       const [clientesData, mascotasData] = await Promise.all([
         getClientes(),
@@ -146,12 +148,16 @@ export function Clientes() {
 
   const abrirCrear = () => {
     setEditando(null);
+    setError("");
+    setSuccess("");
     setForm(estadoInicial);
     setModalAbierto(true);
   };
 
   const abrirEditar = (cliente: Cliente) => {
     setEditando(cliente);
+    setError("");
+    setSuccess("");
     setForm({
       id: cliente.id,
       nombre: cliente.nombre || "",
@@ -165,6 +171,8 @@ export function Clientes() {
 
   const cerrarModal = () => {
     setModalAbierto(false);
+    setError("");
+    setSuccess("");
     setEditando(null);
     setForm(estadoInicial);
   };
@@ -185,6 +193,7 @@ export function Clientes() {
     try {
       setGuardando(true);
       setError("");
+      setSuccess("");
 
       const payload: ClienteInput = {
         id: form.id?.trim(),
@@ -195,17 +204,20 @@ export function Clientes() {
         estado: form.estado,
       };
 
+      let respuesta;
+
       if (editando) {
-        await updateCliente(editando.id, {
+        respuesta = await updateCliente(editando.id, {
           ...payload,
           id: editando.id,
         });
       } else {
-        await createCliente(payload);
+        respuesta = await createCliente(payload);
       }
 
       await cargarDatos();
       cerrarModal();
+      setSuccess(respuesta.message);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error guardando cliente");
     } finally {
@@ -222,13 +234,16 @@ export function Clientes() {
 
     try {
       setError("");
-      await deleteCliente(cliente.id);
+      setSuccess("");
+
+      const respuesta = await deleteCliente(cliente.id);
 
       if (selectedClienteId === cliente.id) {
         setSelectedClienteId(null);
       }
 
       await cargarDatos();
+      setSuccess(respuesta.message);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error eliminando cliente");
     }
@@ -254,6 +269,12 @@ export function Clientes() {
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
+        </div>
+      )}
+
+      {success && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          {success}
         </div>
       )}
 

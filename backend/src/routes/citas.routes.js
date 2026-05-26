@@ -10,6 +10,10 @@ const estadosValidos = [
     "REPROGRAMADA",
 ];
 
+function normalizarId(valor) {
+    return String(valor || "").trim().toUpperCase();
+}
+
 function horaAMinutos(hora) {
     const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(hora || "");
 
@@ -278,7 +282,7 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
     let connection;
 
-    const id = req.params.id;
+    const id = normalizarId(req.params.id);
 
     const {
         mascotaId,
@@ -320,7 +324,7 @@ router.put("/:id", async (req, res) => {
         hora = NUMTODSINTERVAL(:horaMinutos, 'MINUTE'),
         motivoConsulta = :motivo,
         estadoCita = :estado
-      WHERE idCita = :id
+      WHERE TRIM(UPPER(idCita)) = :id
       `,
             {
                 id,
@@ -354,16 +358,16 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
     let connection;
 
-    const id = req.params.id;
+    const id = normalizarId(req.params.id);
 
     try {
         connection = await getConnection();
 
         const result = await connection.execute(
             `
-      DELETE FROM CITA
-      WHERE idCita = :id
-      `,
+            DELETE FROM CITA
+            WHERE TRIM(UPPER(idCita)) = :id
+            `,
             { id },
             { autoCommit: true }
         );

@@ -4,6 +4,10 @@ const { getConnection } = require("../db");
 
 const sexosValidos = ["M", "H", null, ""];
 
+function normalizarId(valor) {
+    return String(valor || "").trim().toUpperCase();
+}
+
 function validarMascota({ id, clienteId, nombre, sexo, peso, especie }, esCreacion = true) {
     if (esCreacion && !id?.trim()) {
         return "El código de la mascota es obligatorio.";
@@ -188,7 +192,7 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
     let connection;
 
-    const id = req.params.id;
+    const id = normalizarId(req.params.id);
 
     const {
         clienteId,
@@ -223,7 +227,7 @@ router.put("/:id", async (req, res) => {
         peso = :peso,
         especie = :especie,
         raza = :raza
-      WHERE codigoMascota = :id
+      WHERE TRIM(UPPER(codigoMascota)) = :id
       `,
             {
                 id,
@@ -257,16 +261,16 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
     let connection;
 
-    const id = req.params.id;
+    const id = normalizarId(req.params.id);
 
     try {
         connection = await getConnection();
 
         const result = await connection.execute(
             `
-      DELETE FROM MASCOTA
-      WHERE codigoMascota = :id
-      `,
+            DELETE FROM MASCOTA
+            WHERE TRIM(UPPER(codigoMascota)) = :id
+            `,
             { id },
             { autoCommit: true }
         );

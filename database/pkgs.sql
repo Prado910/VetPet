@@ -162,6 +162,15 @@ END PKG_EXCEPCIONES;
 -- 2. PKG_PERSONAL
 -- ============================================================
 CREATE OR REPLACE PACKAGE PKG_PERSONAL AS
+        PROCEDURE pr_listar_clientes(
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_obtener_cliente(
+        p_idCliente IN CLIENTE.idCliente%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    );
+
     PROCEDURE pr_insertar_cliente(
         p_idCliente IN CLIENTE.idCliente%TYPE,
         p_nombreCompleto IN CLIENTE.nombreCompleto%TYPE,
@@ -171,6 +180,7 @@ CREATE OR REPLACE PACKAGE PKG_PERSONAL AS
         p_estado IN CLIENTE.estado%TYPE DEFAULT 'ACTIVO',
         p_idCliente_out OUT CLIENTE.idCliente%TYPE
     );
+
     PROCEDURE pr_modificar_cliente(
         p_idCliente IN CLIENTE.idCliente%TYPE,
         p_nombreCompleto IN CLIENTE.nombreCompleto%TYPE,
@@ -180,7 +190,11 @@ CREATE OR REPLACE PACKAGE PKG_PERSONAL AS
         p_estado IN CLIENTE.estado%TYPE,
         p_filas_afectadas OUT NUMBER
     );
-    PROCEDURE pr_eliminar_cliente(p_idCliente IN CLIENTE.idCliente%TYPE, p_filas_afectadas OUT NUMBER);
+
+    PROCEDURE pr_eliminar_cliente(
+        p_idCliente IN CLIENTE.idCliente%TYPE,
+        p_filas_afectadas OUT NUMBER
+    );
 
     PROCEDURE pr_insertar_empleado(
         p_idEmpleado IN EMPLEADO.idEmpleado%TYPE,
@@ -233,32 +247,130 @@ END PKG_PERSONAL;
 /
 
 CREATE OR REPLACE PACKAGE BODY PKG_PERSONAL AS
-    PROCEDURE pr_insertar_cliente(p_idCliente IN CLIENTE.idCliente%TYPE, p_nombreCompleto IN CLIENTE.nombreCompleto%TYPE,
-        p_direccion IN CLIENTE.direccion%TYPE, p_correoElectronico IN CLIENTE.correoElectronico%TYPE,
-        p_telefono IN CLIENTE.telefono%TYPE, p_estado IN CLIENTE.estado%TYPE DEFAULT 'ACTIVO',
-        p_idCliente_out OUT CLIENTE.idCliente%TYPE) IS
+    PROCEDURE pr_listar_clientes(
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
     BEGIN
-        INSERT INTO CLIENTE (idCliente, nombreCompleto, direccion, correoElectronico, telefono, estado)
-        VALUES (p_idCliente, p_nombreCompleto, p_direccion, p_correoElectronico, p_telefono, p_estado)
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(idCliente) AS id,
+                nombreCompleto AS nombre,
+                direccion AS direccion,
+                correoElectronico AS email,
+                telefono AS telefono,
+                estado AS estado
+            FROM CLIENTE
+            ORDER BY nombreCompleto;
+    EXCEPTION
+        WHEN OTHERS THEN
+            PKG_UTILIDADES.manejar('CLIENTE', 'LISTAR', SQLCODE, SQLERRM);
+    END pr_listar_clientes;
+
+    PROCEDURE pr_obtener_cliente(
+        p_idCliente IN CLIENTE.idCliente%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(idCliente) AS id,
+                nombreCompleto AS nombre,
+                direccion AS direccion,
+                correoElectronico AS email,
+                telefono AS telefono,
+                estado AS estado
+            FROM CLIENTE
+            WHERE TRIM(UPPER(idCliente)) = TRIM(UPPER(p_idCliente));
+    EXCEPTION
+        WHEN OTHERS THEN
+            PKG_UTILIDADES.manejar('CLIENTE', 'OBTENER', SQLCODE, SQLERRM);
+    END pr_obtener_cliente;
+
+        PROCEDURE pr_insertar_cliente(
+        p_idCliente IN CLIENTE.idCliente%TYPE,
+        p_nombreCompleto IN CLIENTE.nombreCompleto%TYPE,
+        p_direccion IN CLIENTE.direccion%TYPE,
+        p_correoElectronico IN CLIENTE.correoElectronico%TYPE,
+        p_telefono IN CLIENTE.telefono%TYPE,
+        p_estado IN CLIENTE.estado%TYPE DEFAULT 'ACTIVO',
+        p_idCliente_out OUT CLIENTE.idCliente%TYPE
+    ) IS
+    BEGIN
+        INSERT INTO CLIENTE (
+            idCliente,
+            nombreCompleto,
+            direccion,
+            correoElectronico,
+            telefono,
+            estado
+        ) VALUES (
+            TRIM(UPPER(p_idCliente)),
+            p_nombreCompleto,
+            p_direccion,
+            p_correoElectronico,
+            p_telefono,
+            p_estado
+        )
         RETURNING idCliente INTO p_idCliente_out;
-    EXCEPTION WHEN OTHERS THEN PKG_UTILIDADES.manejar('CLIENTE','INSERTAR',SQLCODE,SQLERRM); END;
+    EXCEPTION
+        WHEN OTHERS THEN
+            PKG_UTILIDADES.manejar('CLIENTE', 'INSERTAR', SQLCODE, SQLERRM);
+    END pr_insertar_cliente;
 
-    PROCEDURE pr_modificar_cliente(p_idCliente IN CLIENTE.idCliente%TYPE, p_nombreCompleto IN CLIENTE.nombreCompleto%TYPE,
-        p_direccion IN CLIENTE.direccion%TYPE, p_correoElectronico IN CLIENTE.correoElectronico%TYPE,
-        p_telefono IN CLIENTE.telefono%TYPE, p_estado IN CLIENTE.estado%TYPE, p_filas_afectadas OUT NUMBER) IS
+    PROCEDURE pr_modificar_cliente(
+        p_idCliente IN CLIENTE.idCliente%TYPE,
+        p_nombreCompleto IN CLIENTE.nombreCompleto%TYPE,
+        p_direccion IN CLIENTE.direccion%TYPE,
+        p_correoElectronico IN CLIENTE.correoElectronico%TYPE,
+        p_telefono IN CLIENTE.telefono%TYPE,
+        p_estado IN CLIENTE.estado%TYPE,
+        p_filas_afectadas OUT NUMBER
+    ) IS
     BEGIN
-        UPDATE CLIENTE SET nombreCompleto=p_nombreCompleto, direccion=p_direccion, correoElectronico=p_correoElectronico,
-               telefono=p_telefono, estado=p_estado WHERE idCliente=p_idCliente;
-        p_filas_afectadas := SQL%ROWCOUNT;
-        IF p_filas_afectadas = 0 THEN PKG_UTILIDADES.lanzar_no_encontrado('CLIENTE', p_idCliente); END IF;
-    EXCEPTION WHEN OTHERS THEN IF SQLCODE BETWEEN -20999 AND -20000 THEN RAISE; END IF; PKG_UTILIDADES.manejar('CLIENTE','MODIFICAR',SQLCODE,SQLERRM); END;
+        UPDATE CLIENTE
+        SET
+            nombreCompleto = p_nombreCompleto,
+            direccion = p_direccion,
+            correoElectronico = p_correoElectronico,
+            telefono = p_telefono,
+            estado = p_estado
+        WHERE TRIM(UPPER(idCliente)) = TRIM(UPPER(p_idCliente));
 
-    PROCEDURE pr_eliminar_cliente(p_idCliente IN CLIENTE.idCliente%TYPE, p_filas_afectadas OUT NUMBER) IS
-    BEGIN
-        DELETE FROM CLIENTE WHERE idCliente=p_idCliente;
         p_filas_afectadas := SQL%ROWCOUNT;
-        IF p_filas_afectadas = 0 THEN PKG_UTILIDADES.lanzar_no_encontrado('CLIENTE', p_idCliente); END IF;
-    EXCEPTION WHEN OTHERS THEN IF SQLCODE BETWEEN -20999 AND -20000 THEN RAISE; END IF; PKG_UTILIDADES.manejar('CLIENTE','ELIMINAR',SQLCODE,SQLERRM); END;
+
+        IF p_filas_afectadas = 0 THEN
+            PKG_UTILIDADES.lanzar_no_encontrado('CLIENTE', p_idCliente);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar('CLIENTE', 'MODIFICAR', SQLCODE, SQLERRM);
+    END pr_modificar_cliente;
+
+    PROCEDURE pr_eliminar_cliente(
+        p_idCliente IN CLIENTE.idCliente%TYPE,
+        p_filas_afectadas OUT NUMBER
+    ) IS
+    BEGIN
+        DELETE FROM CLIENTE
+        WHERE TRIM(UPPER(idCliente)) = TRIM(UPPER(p_idCliente));
+
+        p_filas_afectadas := SQL%ROWCOUNT;
+
+        IF p_filas_afectadas = 0 THEN
+            PKG_UTILIDADES.lanzar_no_encontrado('CLIENTE', p_idCliente);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar('CLIENTE', 'ELIMINAR', SQLCODE, SQLERRM);
+    END pr_eliminar_cliente;
 
     PROCEDURE pr_insertar_empleado(p_idEmpleado IN EMPLEADO.idEmpleado%TYPE, p_nombreCompleto IN EMPLEADO.nombreCompleto%TYPE,
         p_telefono IN EMPLEADO.telefono%TYPE, p_fechaIngreso IN EMPLEADO.fechaIngreso%TYPE,
@@ -993,3 +1105,404 @@ CREATE OR REPLACE PACKAGE BODY PKG_AUDITORIA AS
     EXCEPTION WHEN OTHERS THEN ROLLBACK; END;
 END PKG_AUDITORIA;
 /
+
+
+
+
+CREATE OR REPLACE TRIGGER trg_ai_cliente_auditoria
+AFTER INSERT ON CLIENTE
+FOR EACH ROW
+BEGIN
+    PKG_AUDITORIA.pr_registrar_log(
+        p_tabla      => 'CLIENTE',
+        p_operacion  => 'INSERTAR',
+        p_idRegistro => :NEW.idCliente,
+        p_usuario    => USER
+    );
+END;
+
+
+CREATE OR REPLACE TRIGGER trg_biu_empleado_validar_salario
+BEFORE INSERT OR UPDATE OF salario ON EMPLEADO
+FOR EACH ROW
+BEGIN
+    IF :NEW.salario < 0 THEN
+        PKG_UTILIDADES.lanzar_operacion_invalida(
+            'EMPLEADO',
+            'El salario no puede ser negativo.'
+        );
+    END IF;
+END;
+
+
+
+//instead of
+CREATE OR REPLACE VIEW vw_clientes_activos AS
+SELECT
+    idCliente,
+    nombreCompleto,
+    direccion,
+    correoElectronico,
+    telefono,
+    estado
+FROM CLIENTE
+WHERE estado = 'ACTIVO';
+
+
+CREATE OR REPLACE TRIGGER trg_ioi_vw_clientes_activos
+INSTEAD OF INSERT ON vw_clientes_activos
+FOR EACH ROW
+BEGIN
+    INSERT INTO CLIENTE (
+        idCliente,
+        nombreCompleto,
+        direccion,
+        correoElectronico,
+        telefono,
+        estado
+    ) VALUES (
+        TRIM(UPPER(:NEW.idCliente)),
+        :NEW.nombreCompleto,
+        :NEW.direccion,
+        :NEW.correoElectronico,
+        :NEW.telefono,
+        NVL(:NEW.estado, 'ACTIVO')
+    );
+
+    PKG_AUDITORIA.pr_registrar_log(
+        p_tabla      => 'CLIENTE',
+        p_operacion  => 'INSERTAR_DESDE_VISTA',
+        p_idRegistro => :NEW.idCliente,
+        p_usuario    => USER
+    );
+END;
+
+
+
+
+//compuesto
+
+
+CREATE OR REPLACE TRIGGER trg_comp_detalle_factura_total
+FOR INSERT OR UPDATE OR DELETE ON DETALLE_FACTURA
+COMPOUND TRIGGER
+
+    TYPE t_facturas_afectadas IS TABLE OF FACTURA.idFactura%TYPE INDEX BY VARCHAR2(30);
+    v_facturas t_facturas_afectadas;
+
+    PROCEDURE agregar_factura(p_idFactura FACTURA.idFactura%TYPE) IS
+    BEGIN
+        IF p_idFactura IS NOT NULL THEN
+            v_facturas(TRIM(p_idFactura)) := TRIM(p_idFactura);
+        END IF;
+    END agregar_factura;
+
+AFTER EACH ROW IS
+BEGIN
+    IF INSERTING THEN
+        agregar_factura(:NEW.idFactura);
+    ELSIF UPDATING THEN
+        agregar_factura(:OLD.idFactura);
+        agregar_factura(:NEW.idFactura);
+    ELSIF DELETING THEN
+        agregar_factura(:OLD.idFactura);
+    END IF;
+END AFTER EACH ROW;
+
+AFTER STATEMENT IS
+    v_key VARCHAR2(30);
+    v_filas NUMBER;
+BEGIN
+    v_key := v_facturas.FIRST;
+
+    WHILE v_key IS NOT NULL LOOP
+        PKG_FACTURACION.pr_recalcular_total_factura(
+            p_idFactura        => v_facturas(v_key),
+            p_filas_afectadas  => v_filas
+        );
+
+        v_key := v_facturas.NEXT(v_key);
+    END LOOP;
+END AFTER STATEMENT;
+
+END trg_comp_detalle_factura_total;
+
+
+//pruebas
+
+-- ============================================================
+-- PRUEBA 1: trg_ai_cliente_auditoria
+-- Objetivo: verificar que al insertar un cliente se registre auditoría.
+-- ============================================================
+
+SET SERVEROUTPUT ON;
+
+INSERT INTO CLIENTE (
+    idCliente,
+    nombreCompleto,
+    direccion,
+    correoElectronico,
+    telefono,
+    estado
+) VALUES (
+    'CLI901',
+    'Cliente Auditoria Trigger',
+    'Popayán',
+    'cliente.trigger@correo.com',
+    '3001112233',
+    'ACTIVO'
+);
+
+COMMIT;
+
+SELECT
+    idLog,
+    tabla,
+    operacion,
+    idRegistro,
+    usuario,
+    fechaHora
+FROM LOG_AUDITORIA
+
+
+ORDER BY fechaHora DESC;
+
+
+
+
+
+INSERT INTO EMPLEADO (
+    idEmpleado,
+    nombreCompleto,
+    telefono,
+    fechaIngreso,
+    estadoLaboral,
+    tipoEmpleado,
+    salario
+) VALUES (
+    'EMP901',
+    'Empleado Salario Valido',
+    '3002223344',
+    SYSDATE,
+    'ACTIVO',
+    'RECEPCIONISTA',
+    -1500000
+);
+
+COMMIT;
+
+
+
+
+
+
+INSERT INTO vw_clientes_activos (
+    idCliente,
+    nombreCompleto,
+    direccion,
+    correoElectronico,
+    telefono,
+    estado
+) VALUES (
+    'CLI903',
+    'Cliente Insertado Desde Vista',
+    'Popayán Centro',
+    'vista.trigger@correo.com',
+    '3004445566',
+    'ACTIVO'
+);
+
+COMMIT;
+
+
+
+
+SELECT
+    idCliente,
+    nombreCompleto,
+    direccion,
+    correoElectronico,
+    telefono,
+    estado
+FROM CLIENTE
+WHERE idCliente = 'CLI903';
+
+
+
+
+commit
+
+
+
+
+SELECT
+    idLog,
+    tabla,
+    operacion,
+    idRegistro,
+    usuario,
+    fechaHora
+FROM LOG_AUDITORIA
+
+
+ORDER BY fechaHora DESC;
+
+
+
+
+-- ============================================================
+-- PRUEBA 5A: trg_comp_detalle_factura_total
+-- Objetivo: insertar un detalle y verificar recalculo.
+-- Cambia FAC001 por una factura existente.
+-- ============================================================
+
+SELECT valorTotal AS total_antes
+FROM FACTURA
+WHERE idFactura = 'FAC001';
+
+INSERT INTO DETALLE_FACTURA (
+    idDetalle,
+    idFactura,
+    descripcion,
+    tipoConcepto,
+    cantidad,
+    precioUnitario
+) VALUES (
+    'DETTRG901',
+    'FAC001',
+    'Detalle agregado por trigger compuesto',
+    'OTRO',
+    2,
+    25000
+);
+
+COMMIT;
+
+SELECT valorTotal AS total_despues_insert
+FROM FACTURA
+WHERE idFactura = 'FAC001';
+
+
+
+UPDATE DETALLE_FACTURA
+SET cantidad = 3,
+    precioUnitario = 30000
+WHERE idDetalle = 'DETTRG901';
+
+COMMIT;
+
+SELECT valorTotal AS total_despues_update
+FROM FACTURA
+WHERE idFactura = 'FAC001';
+
+
+
+
+CREATE OR REPLACE TRIGGER trg_comp_detalle_factura_total
+FOR INSERT OR UPDATE OR DELETE ON DETALLE_FACTURA
+COMPOUND TRIGGER
+
+    TYPE t_facturas_afectadas IS TABLE OF FACTURA.idFactura%TYPE INDEX BY VARCHAR2(30);
+    v_facturas t_facturas_afectadas;
+
+    PROCEDURE agregar_factura(p_idFactura FACTURA.idFactura%TYPE) IS
+        v_key VARCHAR2(30);
+    BEGIN
+        IF p_idFactura IS NOT NULL THEN
+            v_key := TRIM(p_idFactura);
+            v_facturas(v_key) := v_key;
+        END IF;
+    END agregar_factura;
+
+AFTER EACH ROW IS
+BEGIN
+    IF INSERTING THEN
+        agregar_factura(:NEW.idFactura);
+
+    ELSIF UPDATING THEN
+        agregar_factura(:OLD.idFactura);
+        agregar_factura(:NEW.idFactura);
+
+    ELSIF DELETING THEN
+        agregar_factura(:OLD.idFactura);
+    END IF;
+END AFTER EACH ROW;
+
+AFTER STATEMENT IS
+    v_key   VARCHAR2(30);
+    v_total NUMBER(14,2);
+BEGIN
+    v_key := v_facturas.FIRST;
+
+    WHILE v_key IS NOT NULL LOOP
+
+        SELECT NVL(SUM(cantidad * precioUnitario), 0)
+        INTO v_total
+        FROM DETALLE_FACTURA
+        WHERE TRIM(idFactura) = v_key;
+
+        UPDATE FACTURA
+        SET valorTotal = v_total
+        WHERE TRIM(idFactura) = v_key;
+
+        v_key := v_facturas.NEXT(v_key);
+    END LOOP;
+END AFTER STATEMENT;
+
+END trg_comp_detalle_factura_total;
+/
+
+
+
+
+SELECT valorTotal AS total_antes
+FROM FACTURA
+WHERE idFactura = 'FAC001';
+
+INSERT INTO DETALLE_FACTURA (
+    idDetalle,
+    idFactura,
+    descripcion,
+    tipoConcepto,
+    cantidad,
+    precioUnitario
+) VALUES (
+    'DETTRG901',
+    'FAC001',
+    'Detalle agregado por trigger compuesto',
+    'OTRO',
+    2,
+    25000
+);
+
+COMMIT;
+
+SELECT valorTotal AS total_despues
+FROM FACTURA
+WHERE idFactura = 'FAC001';
+
+
+
+
+
+UPDATE DETALLE_FACTURA
+SET cantidad = 3,
+    precioUnitario = 30000
+WHERE idDetalle = 'DETTRG901';
+
+COMMIT;
+
+SELECT valorTotal AS total_despues_update
+FROM FACTURA
+WHERE idFactura = 'FAC001';
+
+
+
+DELETE FROM DETALLE_FACTURA
+WHERE idDetalle = 'DETTRG901';
+
+COMMIT;
+
+SELECT valorTotal AS total_despues_delete
+FROM FACTURA
+WHERE idFactura = 'FAC001';
