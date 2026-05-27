@@ -196,6 +196,24 @@ CREATE OR REPLACE PACKAGE PKG_PERSONAL AS
         p_filas_afectadas OUT NUMBER
     );
 
+    PROCEDURE pr_listar_empleados(
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_obtener_empleado(
+        p_idEmpleado IN EMPLEADO.idEmpleado%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_listar_veterinarios(
+        p_soloActivos IN NUMBER DEFAULT 1,
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_listar_recepcionistas(
+        p_soloActivos IN NUMBER DEFAULT 1,
+        p_cursor OUT SYS_REFCURSOR
+    );
     PROCEDURE pr_insertar_empleado(
         p_idEmpleado IN EMPLEADO.idEmpleado%TYPE,
         p_nombreCompleto IN EMPLEADO.nombreCompleto%TYPE,
@@ -371,6 +389,143 @@ CREATE OR REPLACE PACKAGE BODY PKG_PERSONAL AS
 
             PKG_UTILIDADES.manejar('CLIENTE', 'ELIMINAR', SQLCODE, SQLERRM);
     END pr_eliminar_cliente;
+
+        PROCEDURE pr_listar_empleados(
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(e.idEmpleado) AS id,
+                e.nombreCompleto AS nombre,
+                e.telefono AS telefono,
+                TO_CHAR(e.fechaIngreso, 'YYYY-MM-DD') AS fechaIngreso,
+                e.estadoLaboral AS estadoLaboral,
+                e.tipoEmpleado AS tipoEmpleado,
+                e.salario AS salario,
+                v.especialidad AS especialidad,
+                v.nroMatricula AS nroMatricula,
+                r.turno AS turno
+            FROM EMPLEADO e
+            LEFT JOIN VETERINARIO v ON v.idEmpleado = e.idEmpleado
+            LEFT JOIN RECEPCIONISTA r ON r.idEmpleado = e.idEmpleado
+            ORDER BY e.nombreCompleto;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'EMPLEADO',
+                'LISTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_empleados;
+
+
+    PROCEDURE pr_obtener_empleado(
+        p_idEmpleado IN EMPLEADO.idEmpleado%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(e.idEmpleado) AS id,
+                e.nombreCompleto AS nombre,
+                e.telefono AS telefono,
+                TO_CHAR(e.fechaIngreso, 'YYYY-MM-DD') AS fechaIngreso,
+                e.estadoLaboral AS estadoLaboral,
+                e.tipoEmpleado AS tipoEmpleado,
+                e.salario AS salario,
+                v.especialidad AS especialidad,
+                v.nroMatricula AS nroMatricula,
+                r.turno AS turno
+            FROM EMPLEADO e
+            LEFT JOIN VETERINARIO v ON v.idEmpleado = e.idEmpleado
+            LEFT JOIN RECEPCIONISTA r ON r.idEmpleado = e.idEmpleado
+            WHERE TRIM(UPPER(e.idEmpleado)) = TRIM(UPPER(p_idEmpleado));
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'EMPLEADO',
+                'OBTENER',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_obtener_empleado;
+
+
+    PROCEDURE pr_listar_veterinarios(
+        p_soloActivos IN NUMBER DEFAULT 1,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(v.idEmpleado) AS id,
+                e.nombreCompleto AS nombre,
+                e.telefono AS telefono,
+                TO_CHAR(e.fechaIngreso, 'YYYY-MM-DD') AS fechaIngreso,
+                e.estadoLaboral AS estadoLaboral,
+                e.salario AS salario,
+                v.especialidad AS especialidad,
+                v.nroMatricula AS nroMatricula
+            FROM VETERINARIO v
+            JOIN EMPLEADO e ON e.idEmpleado = v.idEmpleado
+            WHERE (p_soloActivos = 0 OR e.estadoLaboral = 'ACTIVO')
+            ORDER BY e.nombreCompleto;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'VETERINARIO',
+                'LISTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_veterinarios;
+
+
+    PROCEDURE pr_listar_recepcionistas(
+        p_soloActivos IN NUMBER DEFAULT 1,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(r.idEmpleado) AS id,
+                e.nombreCompleto AS nombre,
+                e.telefono AS telefono,
+                TO_CHAR(e.fechaIngreso, 'YYYY-MM-DD') AS fechaIngreso,
+                e.estadoLaboral AS estadoLaboral,
+                e.salario AS salario,
+                r.turno AS turno
+            FROM RECEPCIONISTA r
+            JOIN EMPLEADO e ON e.idEmpleado = r.idEmpleado
+            WHERE (p_soloActivos = 0 OR e.estadoLaboral = 'ACTIVO')
+            ORDER BY e.nombreCompleto;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'RECEPCIONISTA',
+                'LISTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_recepcionistas;
 
     PROCEDURE pr_insertar_empleado(p_idEmpleado IN EMPLEADO.idEmpleado%TYPE, p_nombreCompleto IN EMPLEADO.nombreCompleto%TYPE,
         p_telefono IN EMPLEADO.telefono%TYPE, p_fechaIngreso IN EMPLEADO.fechaIngreso%TYPE,
@@ -950,6 +1105,14 @@ END PKG_CONSULTAS_MEDICAS;
 -- 6. PKG_INVENTARIO_MEDICO
 -- ============================================================
 CREATE OR REPLACE PACKAGE PKG_INVENTARIO_MEDICO AS
+    PROCEDURE pr_listar_medicamentos(
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_obtener_medicamento(
+        p_idMedicamento IN MEDICAMENTO.idMedicamento%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    );
     PROCEDURE pr_insertar_medicamento(p_idMedicamento IN MEDICAMENTO.idMedicamento%TYPE, p_nombre IN MEDICAMENTO.nombre%TYPE,
         p_descripcion IN MEDICAMENTO.descripcion%TYPE, p_precioUnitario IN MEDICAMENTO.precioUnitario%TYPE,
         p_idMed_out OUT MEDICAMENTO.idMedicamento%TYPE);
@@ -968,6 +1131,59 @@ END PKG_INVENTARIO_MEDICO;
 /
 
 CREATE OR REPLACE PACKAGE BODY PKG_INVENTARIO_MEDICO AS
+    PROCEDURE pr_listar_medicamentos(
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(idMedicamento) AS id,
+                nombre,
+                descripcion,
+                precioUnitario
+            FROM MEDICAMENTO
+            ORDER BY nombre;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'MEDICAMENTO',
+                'LISTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_medicamentos;
+
+
+    PROCEDURE pr_obtener_medicamento(
+        p_idMedicamento IN MEDICAMENTO.idMedicamento%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(idMedicamento) AS id,
+                nombre,
+                descripcion,
+                precioUnitario
+            FROM MEDICAMENTO
+            WHERE TRIM(UPPER(idMedicamento)) = TRIM(UPPER(p_idMedicamento));
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'MEDICAMENTO',
+                'OBTENER',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_obtener_medicamento;
     PROCEDURE pr_insertar_medicamento(p_idMedicamento IN MEDICAMENTO.idMedicamento%TYPE, p_nombre IN MEDICAMENTO.nombre%TYPE,
         p_descripcion IN MEDICAMENTO.descripcion%TYPE, p_precioUnitario IN MEDICAMENTO.precioUnitario%TYPE,
         p_idMed_out OUT MEDICAMENTO.idMedicamento%TYPE) IS
