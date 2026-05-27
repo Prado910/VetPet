@@ -9,7 +9,6 @@ const {
     outString,
     normalizarTexto,
     normalizarId,
-    normalizarRows,
 } = require("../plsql");
 
 const tiposServicioValidos = [
@@ -127,7 +126,7 @@ router.get("/", async (req, res) => {
 
         const rows = await cursorToRows(result.outBinds.p_cursor);
 
-        res.json(normalizarRows(rows));
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando servicios");
     } finally {
@@ -166,7 +165,7 @@ router.get("/:id", async (req, res) => {
             });
         }
 
-        res.json(normalizarRows(rows)[0]);
+        res.json(rows[0] || {});
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando servicio");
     } finally {

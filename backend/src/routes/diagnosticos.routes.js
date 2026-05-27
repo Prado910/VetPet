@@ -183,7 +183,7 @@ router.get("/:id", async (req, res) => {
             });
         }
 
-        res.json(normalizarRows(rows)[0]);
+        res.json(rows[0] || {});
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando diagnóstico");
     } finally {

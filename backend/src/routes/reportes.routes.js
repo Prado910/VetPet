@@ -105,7 +105,7 @@ router.get("/mascotas-mas-atendidas", async (req, res) => {
 
         const rows = await cursorToRows(result.outBinds.cursor);
 
-        res.json(normalizarRows(rows));
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando mascotas más atendidas");
     } finally {

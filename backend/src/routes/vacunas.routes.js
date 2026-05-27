@@ -9,7 +9,6 @@ const {
     outString,
     normalizarTexto,
     normalizarId,
-    normalizarRows,
 } = require("../plsql");
 
 function esFechaValida(fecha) {
