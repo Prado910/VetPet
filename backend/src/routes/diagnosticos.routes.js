@@ -73,52 +73,21 @@ function manejarErrorOracle(error, res, mensajeBase) {
     });
 }
 
-async function generarIdDiagnostico(connection) {
-    const result = await connection.execute(`
-    SELECT
-      'DIA' ||
-      LPAD(
-        NVL(MAX(TO_NUMBER(REGEXP_SUBSTR(TRIM(idDiagnostico), '[0-9]+$'))), 0) + 1,
-        6,
-        '0'
-      ) AS "id"
-    FROM DIAGNOSTICO
-    WHERE REGEXP_LIKE(TRIM(idDiagnostico), '^DIA[0-9]+$')
-  `);
 
-    return result.rows[0].id;
-}
+
 
 router.get("/catalogos", async (req, res) => {
     let connection;
-
     try {
         connection = await getConnection();
-
-        const consultasResult = await connection.execute(`
-      SELECT
-        TRIM(cv.idConsulta) AS "id",
-        TRIM(cv.idCita) AS "idCita",
-        TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
-        cv.observaciones AS "observaciones",
-        cv.recomendaciones AS "recomendaciones",
-        ma.nombre AS "mascotaNombre",
-        ma.especie AS "mascotaEspecie",
-        cl.nombreCompleto AS "clienteNombre",
-        ev.nombreCompleto AS "veterinarioNombre",
-        cs.nombre AS "servicioNombre"
-      FROM CONSULTA_VETERINARIA cv
-      JOIN CITA ci ON ci.idCita = cv.idCita
-      JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
-      JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
-      JOIN EMPLEADO ev ON ev.idEmpleado = ci.idVeterinario
-      JOIN CATALOGO_SERVICIOS cs ON cs.idServicio = cv.idServicio
-      ORDER BY cv.fechaAtencionReal DESC
-    `);
-
-        res.json({
-            consultas: consultasResult.rows,
-        });
+        const oracledb = require("oracledb");
+        const result = await connection.execute(
+            `BEGIN PKG_CONSULTAS_MEDICAS.pr_listar_consultas_catalogo(:cursor); END;`,
+            { cursor: { dir: oracledb.BIND_OUT, type: oracledb.CURSOR } }
+        );
+        const rows = await result.outBinds.cursor.getRows();
+        await result.outBinds.cursor.close();
+        res.json({ consultas: rows });
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando catálogos de diagnósticos");
     } finally {
@@ -126,59 +95,32 @@ router.get("/catalogos", async (req, res) => {
     }
 });
 
+
 router.get("/", async (req, res) => {
     let connection;
-
     try {
         connection = await getConnection();
-
-        const result = await connection.execute(`
-      SELECT
-        TRIM(d.idDiagnostico) AS "id",
-        TRIM(d.idConsulta) AS "idConsulta",
-        d.descripcionCondicion AS "descripcionCondicion",
-        d.nivelGravedad AS "nivelGravedad",
-        d.tipoAfeccion AS "tipoAfeccion",
-        d.estado AS "estado",
-
-        TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
-        TRIM(ci.idCita) AS "idCita",
-        ci.motivoConsulta AS "motivoConsulta",
-
-        TRIM(ma.codigoMascota) AS "mascotaId",
-        ma.nombre AS "mascotaNombre",
-        ma.especie AS "mascotaEspecie",
-
-        TRIM(cl.idCliente) AS "clienteId",
-        cl.nombreCompleto AS "clienteNombre",
-
-        TRIM(ev.idEmpleado) AS "veterinarioId",
-        ev.nombreCompleto AS "veterinarioNombre",
-
-        cs.nombre AS "servicioNombre",
-
-        (
-          SELECT COUNT(*)
-          FROM TRATAMIENTO t
-          WHERE t.idDiagnostico = d.idDiagnostico
-        ) AS "tratamientosCount"
-      FROM DIAGNOSTICO d
-      JOIN CONSULTA_VETERINARIA cv ON cv.idConsulta = d.idConsulta
-      JOIN CITA ci ON ci.idCita = cv.idCita
-      JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
-      JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
-      JOIN EMPLEADO ev ON ev.idEmpleado = ci.idVeterinario
-      JOIN CATALOGO_SERVICIOS cs ON cs.idServicio = cv.idServicio
-      ORDER BY cv.fechaAtencionReal DESC, d.idDiagnostico DESC
-    `);
-
-        res.json(result.rows);
+        const oracledb = require("oracledb");
+        const result = await connection.execute(
+            `BEGIN PKG_CONSULTAS_MEDICAS.pr_listar_diagnosticos(:cursor); END;`,
+            { cursor: { dir: oracledb.BIND_OUT, type: oracledb.CURSOR } }
+        );
+        const rows = await result.outBinds.cursor.getRows();
+        await result.outBinds.cursor.close();
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando diagnósticos");
     } finally {
         if (connection) await connection.close();
     }
 });
+
+// Generación de ID dentro del POST
+const idResult = await connection.execute(
+    `BEGIN :id := PKG_CONSULTAS_MEDICAS.fn_generar_id_diagnostico(); END;`,
+    { id: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 12 } }
+);
+const idDiagnostico = normalizarTexto(id) || idResult.outBinds.id;
 
 router.post("/", async (req, res) => {
     let connection;

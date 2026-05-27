@@ -695,6 +695,11 @@ END PKG_AGENDAMIENTO;
 -- 5. PKG_CONSULTAS_MEDICAS
 -- ============================================================
 CREATE OR REPLACE PACKAGE PKG_CONSULTAS_MEDICAS AS
+
+    PROCEDURE pr_listar_diagnosticos(p_cursor OUT SYS_REFCURSOR);
+    PROCEDURE pr_listar_consultas_catalogo(p_cursor OUT SYS_REFCURSOR);
+    FUNCTION  fn_generar_id_diagnostico RETURN VARCHAR2;
+
     PROCEDURE pr_insertar_consulta(p_idConsulta IN CONSULTA_VETERINARIA.idConsulta%TYPE, p_idCita IN CONSULTA_VETERINARIA.idCita%TYPE,
         p_idServicio IN CONSULTA_VETERINARIA.idServicio%TYPE, p_temperatura IN CONSULTA_VETERINARIA.temperatura%TYPE,
         p_pesoConsulta IN CONSULTA_VETERINARIA.pesoConsulta%TYPE, p_observaciones IN CONSULTA_VETERINARIA.observaciones%TYPE,
@@ -741,6 +746,73 @@ END PKG_CONSULTAS_MEDICAS;
 /
 
 CREATE OR REPLACE PACKAGE BODY PKG_CONSULTAS_MEDICAS AS
+
+    PROCEDURE pr_listar_diagnosticos(p_cursor OUT SYS_REFCURSOR) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(d.idDiagnostico)                        AS "id",
+                TRIM(d.idConsulta)                           AS "idConsulta",
+                d.descripcionCondicion                       AS "descripcionCondicion",
+                d.nivelGravedad                              AS "nivelGravedad",
+                d.tipoAfeccion                               AS "tipoAfeccion",
+                d.estado                                     AS "estado",
+                TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
+                TRIM(ci.idCita)                              AS "idCita",
+                ci.motivoConsulta                            AS "motivoConsulta",
+                TRIM(ma.codigoMascota)                       AS "mascotaId",
+                ma.nombre                                    AS "mascotaNombre",
+                ma.especie                                   AS "mascotaEspecie",
+                TRIM(cl.idCliente)                           AS "clienteId",
+                cl.nombreCompleto                            AS "clienteNombre",
+                TRIM(ev.idEmpleado)                          AS "veterinarioId",
+                ev.nombreCompleto                            AS "veterinarioNombre",
+                cs.nombre                                    AS "servicioNombre",
+                (SELECT COUNT(*) FROM TRATAMIENTO t WHERE t.idDiagnostico = d.idDiagnostico) AS "tratamientosCount"
+            FROM DIAGNOSTICO d
+            JOIN CONSULTA_VETERINARIA cv ON cv.idConsulta    = d.idConsulta
+            JOIN CITA               ci ON ci.idCita          = cv.idCita
+            JOIN MASCOTA            ma ON ma.codigoMascota   = ci.codigoMascota
+            JOIN CLIENTE            cl ON cl.idCliente       = ma.idCliente
+            JOIN EMPLEADO           ev ON ev.idEmpleado      = ci.idVeterinario
+            JOIN CATALOGO_SERVICIOS cs ON cs.idServicio      = cv.idServicio
+            ORDER BY cv.fechaAtencionReal DESC, d.idDiagnostico DESC;
+    EXCEPTION WHEN OTHERS THEN PKG_UTILIDADES.manejar('DIAGNOSTICO','LISTAR',SQLCODE,SQLERRM); END;
+
+    PROCEDURE pr_listar_consultas_catalogo(p_cursor OUT SYS_REFCURSOR) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(cv.idConsulta)                          AS "id",
+                TRIM(cv.idCita)                              AS "idCita",
+                TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
+                cv.observaciones                             AS "observaciones",
+                cv.recomendaciones                           AS "recomendaciones",
+                ma.nombre                                    AS "mascotaNombre",
+                ma.especie                                   AS "mascotaEspecie",
+                cl.nombreCompleto                            AS "clienteNombre",
+                ev.nombreCompleto                            AS "veterinarioNombre",
+                cs.nombre                                    AS "servicioNombre"
+            FROM CONSULTA_VETERINARIA cv
+            JOIN CITA               ci ON ci.idCita          = cv.idCita
+            JOIN MASCOTA            ma ON ma.codigoMascota   = ci.codigoMascota
+            JOIN CLIENTE            cl ON cl.idCliente       = ma.idCliente
+            JOIN EMPLEADO           ev ON ev.idEmpleado      = ci.idVeterinario
+            JOIN CATALOGO_SERVICIOS cs ON cs.idServicio      = cv.idServicio
+            ORDER BY cv.fechaAtencionReal DESC;
+    EXCEPTION WHEN OTHERS THEN PKG_UTILIDADES.manejar('CONSULTA_VETERINARIA','LISTAR_CATALOGO',SQLCODE,SQLERRM); END;
+
+    FUNCTION fn_generar_id_diagnostico RETURN VARCHAR2 IS
+        v_id VARCHAR2(12);
+    BEGIN
+        SELECT 'DIA' || LPAD(NVL(MAX(TO_NUMBER(REGEXP_SUBSTR(TRIM(idDiagnostico), '[0-9]+$'))), 0) + 1, 6, '0')
+        INTO v_id
+        FROM DIAGNOSTICO
+        WHERE REGEXP_LIKE(TRIM(idDiagnostico), '^DIA[0-9]+$');
+        RETURN v_id;
+    EXCEPTION WHEN OTHERS THEN PKG_UTILIDADES.manejar('DIAGNOSTICO','GEN_ID',SQLCODE,SQLERRM); END;
+
+
     PROCEDURE pr_insertar_consulta(p_idConsulta IN CONSULTA_VETERINARIA.idConsulta%TYPE, p_idCita IN CONSULTA_VETERINARIA.idCita%TYPE,
         p_idServicio IN CONSULTA_VETERINARIA.idServicio%TYPE, p_temperatura IN CONSULTA_VETERINARIA.temperatura%TYPE,
         p_pesoConsulta IN CONSULTA_VETERINARIA.pesoConsulta%TYPE, p_observaciones IN CONSULTA_VETERINARIA.observaciones%TYPE,
