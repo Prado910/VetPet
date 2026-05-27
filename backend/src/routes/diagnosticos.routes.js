@@ -2,11 +2,16 @@ const express = require("express");
 const router = express.Router();
 const { getConnection } = require("../db");
 
-const estadosDiagnosticoValidos = ["PRESUNTIVO", "CONFIRMADO", "DESCARTADO"];
+const {
+    cursorToRows,
+    outCursor,
+    outNumber,
+    outString,
+    normalizarTexto,
+    normalizarId,
+} = require("../plsql");
 
-function normalizarTexto(valor) {
-    return valor?.trim() || null;
-}
+const estadosDiagnosticoValidos = ["PRESUNTIVO", "CONFIRMADO", "DESCARTADO"];
 
 function validarDiagnostico({
     idConsulta,
@@ -34,6 +39,13 @@ function manejarErrorOracle(error, res, mensajeBase) {
     if (error.errorNum === 1) {
         return res.status(409).json({
             message: "Ya existe un diagnóstico con ese ID.",
+            error: error.message,
+        });
+    }
+
+    if (error.errorNum === 20001 || error.errorNum === 20999) {
+        return res.status(404).json({
+            message: "Diagnóstico no encontrado",
             error: error.message,
         });
     }
@@ -73,21 +85,33 @@ function manejarErrorOracle(error, res, mensajeBase) {
     });
 }
 
-
-
-
+/**
+ * GET /api/diagnosticos/catalogos
+ */
 router.get("/catalogos", async (req, res) => {
     let connection;
+
     try {
         connection = await getConnection();
-        const oracledb = require("oracledb");
+
         const result = await connection.execute(
-            `BEGIN PKG_CONSULTAS_MEDICAS.pr_listar_consultas_catalogo(:cursor); END;`,
-            { cursor: { dir: oracledb.BIND_OUT, type: oracledb.CURSOR } }
+            `
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_catalogos_diagnosticos(
+                    :p_consultas
+                );
+            END;
+            `,
+            {
+                p_consultas: outCursor(),
+            }
         );
-        const rows = await result.outBinds.cursor.getRows();
-        await result.outBinds.cursor.close();
-        res.json({ consultas: rows });
+
+        const consultas = await cursorToRows(result.outBinds.p_consultas);
+
+        res.json({
+            consultas,
+        });
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando catálogos de diagnósticos");
     } finally {
@@ -95,18 +119,28 @@ router.get("/catalogos", async (req, res) => {
     }
 });
 
-
+/**
+ * GET /api/diagnosticos
+ */
 router.get("/", async (req, res) => {
     let connection;
+
     try {
         connection = await getConnection();
-        const oracledb = require("oracledb");
+
         const result = await connection.execute(
-            `BEGIN PKG_CONSULTAS_MEDICAS.pr_listar_diagnosticos(:cursor); END;`,
-            { cursor: { dir: oracledb.BIND_OUT, type: oracledb.CURSOR } }
+            `
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_listar_diagnosticos(:p_cursor);
+            END;
+            `,
+            {
+                p_cursor: outCursor(),
+            }
         );
-        const rows = await result.outBinds.cursor.getRows();
-        await result.outBinds.cursor.close();
+
+        const rows = await cursorToRows(result.outBinds.p_cursor);
+
         res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando diagnósticos");
@@ -115,13 +149,51 @@ router.get("/", async (req, res) => {
     }
 });
 
-// Generación de ID dentro del POST
-const idResult = await connection.execute(
-    `BEGIN :id := PKG_CONSULTAS_MEDICAS.fn_generar_id_diagnostico(); END;`,
-    { id: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 12 } }
-);
-const idDiagnostico = normalizarTexto(id) || idResult.outBinds.id;
+/**
+ * GET /api/diagnosticos/:id
+ */
+router.get("/:id", async (req, res) => {
+    let connection;
 
+    const id = normalizarId(req.params.id);
+
+    try {
+        connection = await getConnection();
+
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_obtener_diagnostico(
+                    :p_idDiagnostico,
+                    :p_cursor
+                );
+            END;
+            `,
+            {
+                p_idDiagnostico: id,
+                p_cursor: outCursor(),
+            }
+        );
+
+        const rows = await cursorToRows(result.outBinds.p_cursor);
+
+        if (rows.length === 0) {
+            return res.status(404).json({
+                message: "Diagnóstico no encontrado",
+            });
+        }
+
+        res.json(rows[0]);
+    } catch (error) {
+        manejarErrorOracle(error, res, "Error consultando diagnóstico");
+    } finally {
+        if (connection) await connection.close();
+    }
+});
+
+/**
+ * POST /api/diagnosticos
+ */
 router.post("/", async (req, res) => {
     let connection;
 
@@ -147,41 +219,37 @@ router.post("/", async (req, res) => {
     try {
         connection = await getConnection();
 
-        const idDiagnostico =
-            normalizarTexto(id) || (await generarIdDiagnostico(connection));
-
-        await connection.execute(
+        const result = await connection.execute(
             `
-      INSERT INTO DIAGNOSTICO (
-        idDiagnostico,
-        idConsulta,
-        descripcionCondicion,
-        nivelGravedad,
-        tipoAfeccion,
-        estado
-      ) VALUES (
-        :idDiagnostico,
-        :idConsulta,
-        :descripcionCondicion,
-        :nivelGravedad,
-        :tipoAfeccion,
-        :estado
-      )
-      `,
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_insertar_diagnostico(
+                    :p_idDiagnostico,
+                    :p_idConsulta,
+                    :p_descripcionCondicion,
+                    :p_nivelGravedad,
+                    :p_tipoAfeccion,
+                    :p_estado,
+                    :p_idDiagnostico_out
+                );
+            END;
+            `,
             {
-                idDiagnostico,
-                idConsulta: idConsulta.trim(),
-                descripcionCondicion: descripcionCondicion.trim(),
-                nivelGravedad: normalizarTexto(nivelGravedad),
-                tipoAfeccion: normalizarTexto(tipoAfeccion),
-                estado,
+                p_idDiagnostico: normalizarTexto(id),
+                p_idConsulta: normalizarId(idConsulta),
+                p_descripcionCondicion: descripcionCondicion.trim(),
+                p_nivelGravedad: normalizarTexto(nivelGravedad),
+                p_tipoAfeccion: normalizarTexto(tipoAfeccion),
+                p_estado: estado,
+                p_idDiagnostico_out: outString(30),
             },
             { autoCommit: true }
         );
 
         res.status(201).json({
+            ok: true,
+            action: "CREATED",
             message: "Diagnóstico creado correctamente",
-            id: idDiagnostico,
+            id: result.outBinds.p_idDiagnostico_out,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error creando diagnóstico");
@@ -190,10 +258,13 @@ router.post("/", async (req, res) => {
     }
 });
 
+/**
+ * PUT /api/diagnosticos/:id
+ */
 router.put("/:id", async (req, res) => {
     let connection;
 
-    const id = req.params.id;
+    const id = normalizarId(req.params.id);
 
     const {
         idConsulta,
@@ -218,34 +289,36 @@ router.put("/:id", async (req, res) => {
 
         const result = await connection.execute(
             `
-      UPDATE DIAGNOSTICO
-      SET
-        idConsulta = :idConsulta,
-        descripcionCondicion = :descripcionCondicion,
-        nivelGravedad = :nivelGravedad,
-        tipoAfeccion = :tipoAfeccion,
-        estado = :estado
-      WHERE idDiagnostico = :id
-      `,
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_modificar_diagnostico(
+                    :p_idDiagnostico,
+                    :p_idConsulta,
+                    :p_descripcionCondicion,
+                    :p_nivelGravedad,
+                    :p_tipoAfeccion,
+                    :p_estado,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
             {
-                id,
-                idConsulta: idConsulta.trim(),
-                descripcionCondicion: descripcionCondicion.trim(),
-                nivelGravedad: normalizarTexto(nivelGravedad),
-                tipoAfeccion: normalizarTexto(tipoAfeccion),
-                estado,
+                p_idDiagnostico: id,
+                p_idConsulta: normalizarId(idConsulta),
+                p_descripcionCondicion: descripcionCondicion.trim(),
+                p_nivelGravedad: normalizarTexto(nivelGravedad),
+                p_tipoAfeccion: normalizarTexto(tipoAfeccion),
+                p_estado: estado,
+                p_filas_afectadas: outNumber(),
             },
             { autoCommit: true }
         );
 
-        if (result.rowsAffected === 0) {
-            return res.status(404).json({
-                message: "Diagnóstico no encontrado",
-            });
-        }
-
         res.json({
+            ok: true,
+            action: "UPDATED",
             message: "Diagnóstico actualizado correctamente",
+            id,
+            filasAfectadas: result.outBinds.p_filas_afectadas,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error actualizando diagnóstico");
@@ -254,31 +327,39 @@ router.put("/:id", async (req, res) => {
     }
 });
 
+/**
+ * DELETE /api/diagnosticos/:id
+ */
 router.delete("/:id", async (req, res) => {
     let connection;
 
-    const id = req.params.id;
+    const id = normalizarId(req.params.id);
 
     try {
         connection = await getConnection();
 
         const result = await connection.execute(
             `
-      DELETE FROM DIAGNOSTICO
-      WHERE idDiagnostico = :id
-      `,
-            { id },
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_eliminar_diagnostico(
+                    :p_idDiagnostico,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
+            {
+                p_idDiagnostico: id,
+                p_filas_afectadas: outNumber(),
+            },
             { autoCommit: true }
         );
 
-        if (result.rowsAffected === 0) {
-            return res.status(404).json({
-                message: "Diagnóstico no encontrado",
-            });
-        }
-
         res.json({
+            ok: true,
+            action: "DELETED",
             message: "Diagnóstico eliminado correctamente",
+            id,
+            filasAfectadas: result.outBinds.p_filas_afectadas,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error eliminando diagnóstico");

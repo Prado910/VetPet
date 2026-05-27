@@ -2,6 +2,15 @@ const express = require("express");
 const router = express.Router();
 const { getConnection } = require("../db");
 
+const {
+    cursorToRows,
+    outCursor,
+    outNumber,
+    outString,
+    normalizarTexto,
+    normalizarId,
+} = require("../plsql");
+
 const tiposTratamientoValidos = [
     "MEDICACION",
     "OBSERVACION",
@@ -21,10 +30,6 @@ const estadosTratamientoValidos = [
 
 function esFechaValida(fecha) {
     return /^\d{4}-\d{2}-\d{2}$/.test(fecha || "");
-}
-
-function normalizarTexto(valor) {
-    return valor?.trim() || null;
 }
 
 function validarTratamiento({
@@ -96,9 +101,17 @@ function manejarErrorOracle(error, res, mensajeBase) {
         });
     }
 
+    if (error.errorNum === 20001 || error.errorNum === 20999) {
+        return res.status(404).json({
+            message: "Registro no encontrado.",
+            error: error.message,
+        });
+    }
+
     if (error.errorNum === 2291) {
         return res.status(400).json({
-            message: "El diagnóstico, veterinario, servicio o medicamento seleccionado no existe.",
+            message:
+                "El diagnóstico, veterinario, servicio o medicamento seleccionado no existe.",
             error: error.message,
         });
     }
@@ -131,95 +144,41 @@ function manejarErrorOracle(error, res, mensajeBase) {
     });
 }
 
-async function generarIdTratamiento(connection) {
-    const result = await connection.execute(`
-    SELECT
-      'TRAT' ||
-      LPAD(
-        NVL(MAX(TO_NUMBER(REGEXP_SUBSTR(TRIM(idTratamiento), '[0-9]+$'))), 0) + 1,
-        6,
-        '0'
-      ) AS "id"
-    FROM TRATAMIENTO
-    WHERE REGEXP_LIKE(TRIM(idTratamiento), '^TRAT[0-9]+$')
-  `);
-
-    return result.rows[0].id;
-}
-
 router.get("/catalogos", async (req, res) => {
     let connection;
 
     try {
         connection = await getConnection();
 
-        const [
-            diagnosticosResult,
-            veterinariosResult,
-            serviciosResult,
-            medicamentosResult,
-        ] = await Promise.all([
-            connection.execute(`
-        SELECT
-          TRIM(d.idDiagnostico) AS "id",
-          TRIM(d.idConsulta) AS "idConsulta",
-          d.descripcionCondicion AS "descripcionCondicion",
-          d.nivelGravedad AS "nivelGravedad",
-          d.tipoAfeccion AS "tipoAfeccion",
-          d.estado AS "estado",
-          TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
-          ma.nombre AS "mascotaNombre",
-          ma.especie AS "mascotaEspecie",
-          cl.nombreCompleto AS "clienteNombre",
-          ev.nombreCompleto AS "veterinarioConsultaNombre"
-        FROM DIAGNOSTICO d
-        JOIN CONSULTA_VETERINARIA cv ON cv.idConsulta = d.idConsulta
-        JOIN CITA ci ON ci.idCita = cv.idCita
-        JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
-        JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
-        JOIN EMPLEADO ev ON ev.idEmpleado = ci.idVeterinario
-        ORDER BY cv.fechaAtencionReal DESC, d.idDiagnostico DESC
-      `),
-            connection.execute(`
-        SELECT
-          TRIM(v.idEmpleado) AS "id",
-          e.nombreCompleto AS "nombre",
-          e.telefono AS "telefono",
-          v.especialidad AS "especialidad",
-          v.nroMatricula AS "nroMatricula"
-        FROM VETERINARIO v
-        JOIN EMPLEADO e ON e.idEmpleado = v.idEmpleado
-        WHERE e.estadoLaboral = 'ACTIVO'
-        ORDER BY e.nombreCompleto
-      `),
-            connection.execute(`
-        SELECT
-          TRIM(idServicio) AS "id",
-          nombre AS "nombre",
-          tipoServicio AS "tipoServicio",
-          precio AS "precio",
-          descripcion AS "descripcion",
-          activo AS "activo"
-        FROM CATALOGO_SERVICIOS
-        WHERE activo = 'S'
-        ORDER BY nombre
-      `),
-            connection.execute(`
-        SELECT
-          TRIM(idMedicamento) AS "id",
-          nombre AS "nombre",
-          descripcion AS "descripcion",
-          precioUnitario AS "precioUnitario"
-        FROM MEDICAMENTO
-        ORDER BY nombre
-      `),
-        ]);
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_catalogos_tratamientos(
+                    :p_diagnosticos,
+                    :p_veterinarios,
+                    :p_servicios,
+                    :p_medicamentos
+                );
+            END;
+            `,
+            {
+                p_diagnosticos: outCursor(),
+                p_veterinarios: outCursor(),
+                p_servicios: outCursor(),
+                p_medicamentos: outCursor(),
+            }
+        );
+
+        const diagnosticos = await cursorToRows(result.outBinds.p_diagnosticos);
+        const veterinarios = await cursorToRows(result.outBinds.p_veterinarios);
+        const servicios = await cursorToRows(result.outBinds.p_servicios);
+        const medicamentos = await cursorToRows(result.outBinds.p_medicamentos);
 
         res.json({
-            diagnosticos: diagnosticosResult.rows,
-            veterinarios: veterinariosResult.rows,
-            servicios: serviciosResult.rows,
-            medicamentos: medicamentosResult.rows,
+            diagnosticos,
+            veterinarios,
+            servicios,
+            medicamentos,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando catálogos de tratamientos");
@@ -230,32 +189,28 @@ router.get("/catalogos", async (req, res) => {
 
 router.get("/:id/medicamentos", async (req, res) => {
     let connection;
-    const id = req.params.id;
+    const id = normalizarId(req.params.id);
 
     try {
         connection = await getConnection();
 
         const result = await connection.execute(
             `
-      SELECT
-        TRIM(tm.idTratamiento) AS "idTratamiento",
-        TRIM(tm.idMedicamento) AS "idMedicamento",
-        tm.dosis AS "dosis",
-        tm.frecuencia AS "frecuencia",
-        tm.viaAdministracion AS "viaAdministracion",
-        tm.duracion AS "duracion",
-        m.nombre AS "medicamentoNombre",
-        m.descripcion AS "medicamentoDescripcion",
-        m.precioUnitario AS "precioUnitario"
-      FROM TRATAMIENTO_MEDICAMENTO tm
-      JOIN MEDICAMENTO m ON m.idMedicamento = tm.idMedicamento
-      WHERE tm.idTratamiento = :id
-      ORDER BY m.nombre
-      `,
-            { id }
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_listar_medicamentos_tratamiento(
+                    :p_idTratamiento,
+                    :p_cursor
+                );
+            END;
+            `,
+            {
+                p_idTratamiento: id,
+                p_cursor: outCursor(),
+            }
         );
 
-        res.json(result.rows);
+        const rows = await cursorToRows(result.outBinds.p_cursor);
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando medicamentos del tratamiento");
     } finally {
@@ -266,7 +221,7 @@ router.get("/:id/medicamentos", async (req, res) => {
 router.post("/:id/medicamentos", async (req, res) => {
     let connection;
 
-    const idTratamiento = req.params.id;
+    const idTratamiento = normalizarId(req.params.id);
     const {
         idMedicamento,
         dosis,
@@ -290,34 +245,31 @@ router.post("/:id/medicamentos", async (req, res) => {
 
         await connection.execute(
             `
-      INSERT INTO TRATAMIENTO_MEDICAMENTO (
-        idTratamiento,
-        idMedicamento,
-        dosis,
-        frecuencia,
-        viaAdministracion,
-        duracion
-      ) VALUES (
-        :idTratamiento,
-        :idMedicamento,
-        :dosis,
-        :frecuencia,
-        :viaAdministracion,
-        :duracion
-      )
-      `,
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_insertar_tratamiento_medicamento(
+                    :p_idTratamiento,
+                    :p_idMedicamento,
+                    :p_dosis,
+                    :p_frecuencia,
+                    :p_viaAdministracion,
+                    :p_duracion
+                );
+            END;
+            `,
             {
-                idTratamiento: idTratamiento.trim(),
-                idMedicamento: idMedicamento.trim(),
-                dosis: dosis.trim(),
-                frecuencia: frecuencia.trim(),
-                viaAdministracion: normalizarTexto(viaAdministracion),
-                duracion: normalizarTexto(duracion),
+                p_idTratamiento: idTratamiento,
+                p_idMedicamento: normalizarId(idMedicamento),
+                p_dosis: dosis.trim(),
+                p_frecuencia: frecuencia.trim(),
+                p_viaAdministracion: normalizarTexto(viaAdministracion),
+                p_duracion: normalizarTexto(duracion),
             },
             { autoCommit: true }
         );
 
         res.status(201).json({
+            ok: true,
+            action: "CREATED",
             message: "Medicamento asociado correctamente al tratamiento",
         });
     } catch (error) {
@@ -330,8 +282,8 @@ router.post("/:id/medicamentos", async (req, res) => {
 router.put("/:id/medicamentos/:idMedicamento", async (req, res) => {
     let connection;
 
-    const idTratamiento = req.params.id;
-    const idMedicamentoParam = req.params.idMedicamento;
+    const idTratamiento = normalizarId(req.params.id);
+    const idMedicamentoParam = normalizarId(req.params.idMedicamento);
 
     const {
         dosis,
@@ -355,34 +307,35 @@ router.put("/:id/medicamentos/:idMedicamento", async (req, res) => {
 
         const result = await connection.execute(
             `
-      UPDATE TRATAMIENTO_MEDICAMENTO
-      SET
-        dosis = :dosis,
-        frecuencia = :frecuencia,
-        viaAdministracion = :viaAdministracion,
-        duracion = :duracion
-      WHERE idTratamiento = :idTratamiento
-        AND idMedicamento = :idMedicamento
-      `,
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_modificar_tratamiento_medicamento(
+                    :p_idTratamiento,
+                    :p_idMedicamento,
+                    :p_dosis,
+                    :p_frecuencia,
+                    :p_viaAdministracion,
+                    :p_duracion,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
             {
-                idTratamiento: idTratamiento.trim(),
-                idMedicamento: idMedicamentoParam.trim(),
-                dosis: dosis.trim(),
-                frecuencia: frecuencia.trim(),
-                viaAdministracion: normalizarTexto(viaAdministracion),
-                duracion: normalizarTexto(duracion),
+                p_idTratamiento: idTratamiento,
+                p_idMedicamento: idMedicamentoParam,
+                p_dosis: dosis.trim(),
+                p_frecuencia: frecuencia.trim(),
+                p_viaAdministracion: normalizarTexto(viaAdministracion),
+                p_duracion: normalizarTexto(duracion),
+                p_filas_afectadas: outNumber(),
             },
             { autoCommit: true }
         );
 
-        if (result.rowsAffected === 0) {
-            return res.status(404).json({
-                message: "Medicamento del tratamiento no encontrado",
-            });
-        }
-
         res.json({
+            ok: true,
+            action: "UPDATED",
             message: "Medicamento del tratamiento actualizado correctamente",
+            filasAfectadas: result.outBinds.p_filas_afectadas,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error actualizando medicamento del tratamiento");
@@ -394,33 +347,35 @@ router.put("/:id/medicamentos/:idMedicamento", async (req, res) => {
 router.delete("/:id/medicamentos/:idMedicamento", async (req, res) => {
     let connection;
 
-    const idTratamiento = req.params.id;
-    const idMedicamento = req.params.idMedicamento;
+    const idTratamiento = normalizarId(req.params.id);
+    const idMedicamento = normalizarId(req.params.idMedicamento);
 
     try {
         connection = await getConnection();
 
         const result = await connection.execute(
             `
-      DELETE FROM TRATAMIENTO_MEDICAMENTO
-      WHERE idTratamiento = :idTratamiento
-        AND idMedicamento = :idMedicamento
-      `,
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_eliminar_tratamiento_medicamento(
+                    :p_idTratamiento,
+                    :p_idMedicamento,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
             {
-                idTratamiento,
-                idMedicamento,
+                p_idTratamiento: idTratamiento,
+                p_idMedicamento: idMedicamento,
+                p_filas_afectadas: outNumber(),
             },
             { autoCommit: true }
         );
 
-        if (result.rowsAffected === 0) {
-            return res.status(404).json({
-                message: "Medicamento del tratamiento no encontrado",
-            });
-        }
-
         res.json({
+            ok: true,
+            action: "DELETED",
             message: "Medicamento eliminado del tratamiento correctamente",
+            filasAfectadas: result.outBinds.p_filas_afectadas,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error eliminando medicamento del tratamiento");
@@ -435,62 +390,60 @@ router.get("/", async (req, res) => {
     try {
         connection = await getConnection();
 
-        const result = await connection.execute(`
-      SELECT
-        TRIM(t.idTratamiento) AS "id",
-        TRIM(t.idDiagnostico) AS "idDiagnostico",
-        TRIM(t.idVeterinario) AS "idVeterinario",
-        TRIM(t.idServicio) AS "idServicio",
-        t.tipo AS "tipo",
-        TO_CHAR(t.fechaInicio, 'YYYY-MM-DD') AS "fechaInicio",
-        TO_CHAR(t.fechaFinEstimada, 'YYYY-MM-DD') AS "fechaFinEstimada",
-        t.indicaciones AS "indicaciones",
-        t.estado AS "estado",
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_listar_tratamientos(:p_cursor);
+            END;
+            `,
+            {
+                p_cursor: outCursor(),
+            }
+        );
 
-        d.descripcionCondicion AS "descripcionCondicion",
-        d.nivelGravedad AS "nivelGravedad",
-        d.tipoAfeccion AS "tipoAfeccion",
-        d.estado AS "diagnosticoEstado",
-
-        TRIM(cv.idConsulta) AS "idConsulta",
-        TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
-
-        ma.nombre AS "mascotaNombre",
-        ma.especie AS "mascotaEspecie",
-        cl.nombreCompleto AS "clienteNombre",
-
-        ev.nombreCompleto AS "veterinarioNombre",
-
-        cs.nombre AS "servicioNombre",
-        cs.tipoServicio AS "servicioTipo",
-        cs.precio AS "servicioPrecio",
-
-        (
-          SELECT COUNT(*)
-          FROM TRATAMIENTO_MEDICAMENTO tm
-          WHERE tm.idTratamiento = t.idTratamiento
-        ) AS "medicamentosCount",
-
-        (
-          SELECT LISTAGG(m.nombre, ', ') WITHIN GROUP (ORDER BY m.nombre)
-          FROM TRATAMIENTO_MEDICAMENTO tm
-          JOIN MEDICAMENTO m ON m.idMedicamento = tm.idMedicamento
-          WHERE tm.idTratamiento = t.idTratamiento
-        ) AS "medicamentos"
-      FROM TRATAMIENTO t
-      JOIN DIAGNOSTICO d ON d.idDiagnostico = t.idDiagnostico
-      JOIN CONSULTA_VETERINARIA cv ON cv.idConsulta = d.idConsulta
-      JOIN CITA ci ON ci.idCita = cv.idCita
-      JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
-      JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
-      JOIN EMPLEADO ev ON ev.idEmpleado = t.idVeterinario
-      LEFT JOIN CATALOGO_SERVICIOS cs ON cs.idServicio = t.idServicio
-      ORDER BY t.fechaInicio DESC, t.idTratamiento DESC
-    `);
-
-        res.json(result.rows);
+        const rows = await cursorToRows(result.outBinds.p_cursor);
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando tratamientos");
+    } finally {
+        if (connection) await connection.close();
+    }
+});
+
+router.get("/:id", async (req, res) => {
+    let connection;
+
+    const id = normalizarId(req.params.id);
+
+    try {
+        connection = await getConnection();
+
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_obtener_tratamiento(
+                    :p_idTratamiento,
+                    :p_cursor
+                );
+            END;
+            `,
+            {
+                p_idTratamiento: id,
+                p_cursor: outCursor(),
+            }
+        );
+
+        const rows = await cursorToRows(result.outBinds.p_cursor);
+
+        if (rows.length === 0) {
+            return res.status(404).json({
+                message: "Tratamiento no encontrado",
+            });
+        }
+
+        res.json(rows[0]);
+    } catch (error) {
+        manejarErrorOracle(error, res, "Error consultando tratamiento");
     } finally {
         if (connection) await connection.close();
     }
@@ -527,53 +480,46 @@ router.post("/", async (req, res) => {
     try {
         connection = await getConnection();
 
-        const idTratamiento =
-            normalizarTexto(id) || (await generarIdTratamiento(connection));
-
-        await connection.execute(
+        const result = await connection.execute(
             `
-      INSERT INTO TRATAMIENTO (
-        idTratamiento,
-        idDiagnostico,
-        idVeterinario,
-        idServicio,
-        tipo,
-        fechaInicio,
-        fechaFinEstimada,
-        indicaciones,
-        estado
-      ) VALUES (
-        :idTratamiento,
-        :idDiagnostico,
-        :idVeterinario,
-        :idServicio,
-        :tipo,
-        TO_DATE(:fechaInicio, 'YYYY-MM-DD'),
-        CASE
-          WHEN :fechaFinEstimada IS NULL THEN NULL
-          ELSE TO_DATE(:fechaFinEstimada, 'YYYY-MM-DD')
-        END,
-        :indicaciones,
-        :estado
-      )
-      `,
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_insertar_tratamiento(
+                    :p_idTratamiento,
+                    :p_idDiagnostico,
+                    :p_idVeterinario,
+                    :p_idServicio,
+                    :p_tipo,
+                    TO_DATE(:p_fechaInicio, 'YYYY-MM-DD'),
+                    CASE
+                        WHEN :p_fechaFinEstimada IS NULL THEN NULL
+                        ELSE TO_DATE(:p_fechaFinEstimada, 'YYYY-MM-DD')
+                    END,
+                    :p_indicaciones,
+                    :p_estado,
+                    :p_idTratamiento_out
+                );
+            END;
+            `,
             {
-                idTratamiento,
-                idDiagnostico: idDiagnostico.trim(),
-                idVeterinario: idVeterinario.trim(),
-                idServicio: normalizarTexto(idServicio),
-                tipo,
-                fechaInicio,
-                fechaFinEstimada: normalizarTexto(fechaFinEstimada),
-                indicaciones: normalizarTexto(indicaciones),
-                estado: normalizarTexto(estado),
+                p_idTratamiento: normalizarTexto(id),
+                p_idDiagnostico: normalizarId(idDiagnostico),
+                p_idVeterinario: normalizarId(idVeterinario),
+                p_idServicio: normalizarTexto(idServicio),
+                p_tipo: tipo,
+                p_fechaInicio: fechaInicio,
+                p_fechaFinEstimada: normalizarTexto(fechaFinEstimada),
+                p_indicaciones: normalizarTexto(indicaciones),
+                p_estado: normalizarTexto(estado),
+                p_idTratamiento_out: outString(30),
             },
             { autoCommit: true }
         );
 
         res.status(201).json({
+            ok: true,
+            action: "CREATED",
             message: "Tratamiento creado correctamente",
-            id: idTratamiento,
+            id: result.outBinds.p_idTratamiento_out,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error creando tratamiento");
@@ -585,7 +531,7 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
     let connection;
 
-    const id = req.params.id;
+    const id = normalizarId(req.params.id);
 
     const {
         idDiagnostico,
@@ -616,43 +562,45 @@ router.put("/:id", async (req, res) => {
 
         const result = await connection.execute(
             `
-      UPDATE TRATAMIENTO
-      SET
-        idDiagnostico = :idDiagnostico,
-        idVeterinario = :idVeterinario,
-        idServicio = :idServicio,
-        tipo = :tipo,
-        fechaInicio = TO_DATE(:fechaInicio, 'YYYY-MM-DD'),
-        fechaFinEstimada = CASE
-          WHEN :fechaFinEstimada IS NULL THEN NULL
-          ELSE TO_DATE(:fechaFinEstimada, 'YYYY-MM-DD')
-        END,
-        indicaciones = :indicaciones,
-        estado = :estado
-      WHERE idTratamiento = :id
-      `,
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_modificar_tratamiento(
+                    :p_idTratamiento,
+                    :p_idDiagnostico,
+                    :p_idVeterinario,
+                    :p_idServicio,
+                    :p_tipo,
+                    TO_DATE(:p_fechaInicio, 'YYYY-MM-DD'),
+                    CASE
+                        WHEN :p_fechaFinEstimada IS NULL THEN NULL
+                        ELSE TO_DATE(:p_fechaFinEstimada, 'YYYY-MM-DD')
+                    END,
+                    :p_indicaciones,
+                    :p_estado,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
             {
-                id,
-                idDiagnostico: idDiagnostico.trim(),
-                idVeterinario: idVeterinario.trim(),
-                idServicio: normalizarTexto(idServicio),
-                tipo,
-                fechaInicio,
-                fechaFinEstimada: normalizarTexto(fechaFinEstimada),
-                indicaciones: normalizarTexto(indicaciones),
-                estado: normalizarTexto(estado),
+                p_idTratamiento: id,
+                p_idDiagnostico: normalizarId(idDiagnostico),
+                p_idVeterinario: normalizarId(idVeterinario),
+                p_idServicio: normalizarTexto(idServicio),
+                p_tipo: tipo,
+                p_fechaInicio: fechaInicio,
+                p_fechaFinEstimada: normalizarTexto(fechaFinEstimada),
+                p_indicaciones: normalizarTexto(indicaciones),
+                p_estado: normalizarTexto(estado),
+                p_filas_afectadas: outNumber(),
             },
             { autoCommit: true }
         );
 
-        if (result.rowsAffected === 0) {
-            return res.status(404).json({
-                message: "Tratamiento no encontrado",
-            });
-        }
-
         res.json({
+            ok: true,
+            action: "UPDATED",
             message: "Tratamiento actualizado correctamente",
+            id,
+            filasAfectadas: result.outBinds.p_filas_afectadas,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error actualizando tratamiento");
@@ -664,28 +612,33 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
     let connection;
 
-    const id = req.params.id;
+    const id = normalizarId(req.params.id);
 
     try {
         connection = await getConnection();
 
         const result = await connection.execute(
             `
-      DELETE FROM TRATAMIENTO
-      WHERE idTratamiento = :id
-      `,
-            { id },
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_eliminar_tratamiento(
+                    :p_idTratamiento,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
+            {
+                p_idTratamiento: id,
+                p_filas_afectadas: outNumber(),
+            },
             { autoCommit: true }
         );
 
-        if (result.rowsAffected === 0) {
-            return res.status(404).json({
-                message: "Tratamiento no encontrado",
-            });
-        }
-
         res.json({
+            ok: true,
+            action: "DELETED",
             message: "Tratamiento eliminado correctamente",
+            id,
+            filasAfectadas: result.outBinds.p_filas_afectadas,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error eliminando tratamiento");

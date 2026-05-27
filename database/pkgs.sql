@@ -1104,7 +1104,6 @@ END PKG_AGENDAMIENTO;
 -- 5. PKG_CONSULTAS_MEDICAS
 -- ============================================================
 CREATE OR REPLACE PACKAGE PKG_CONSULTAS_MEDICAS AS
-<<<<<<< HEAD
     PROCEDURE pr_listar_consultas(
         p_cursor OUT SYS_REFCURSOR
     );
@@ -1118,13 +1117,20 @@ CREATE OR REPLACE PACKAGE PKG_CONSULTAS_MEDICAS AS
         p_citas OUT SYS_REFCURSOR,
         p_servicios OUT SYS_REFCURSOR
     );
-=======
 
-    PROCEDURE pr_listar_diagnosticos(p_cursor OUT SYS_REFCURSOR);
-    PROCEDURE pr_listar_consultas_catalogo(p_cursor OUT SYS_REFCURSOR);
-    FUNCTION  fn_generar_id_diagnostico RETURN VARCHAR2;
+    PROCEDURE pr_listar_diagnosticos(
+        p_cursor OUT SYS_REFCURSOR
+    );
 
->>>>>>> 703f16cc5c278369c156709d0fd9e6a46e7a072e
+    PROCEDURE pr_obtener_diagnostico(
+        p_idDiagnostico IN DIAGNOSTICO.idDiagnostico%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_catalogos_diagnosticos(
+        p_consultas OUT SYS_REFCURSOR
+    );
+
     PROCEDURE pr_insertar_consulta(p_idConsulta IN CONSULTA_VETERINARIA.idConsulta%TYPE, p_idCita IN CONSULTA_VETERINARIA.idCita%TYPE,
         p_idServicio IN CONSULTA_VETERINARIA.idServicio%TYPE, p_temperatura IN CONSULTA_VETERINARIA.temperatura%TYPE,
         p_pesoConsulta IN CONSULTA_VETERINARIA.pesoConsulta%TYPE, p_observaciones IN CONSULTA_VETERINARIA.observaciones%TYPE,
@@ -1146,6 +1152,26 @@ CREATE OR REPLACE PACKAGE PKG_CONSULTAS_MEDICAS AS
         p_tipoAfeccion IN DIAGNOSTICO.tipoAfeccion%TYPE, p_estado IN DIAGNOSTICO.estado%TYPE, p_filas_afectadas OUT NUMBER);
     PROCEDURE pr_eliminar_diagnostico(p_idDiagnostico IN DIAGNOSTICO.idDiagnostico%TYPE, p_filas_afectadas OUT NUMBER);
 
+    PROCEDURE pr_listar_tratamientos(
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_obtener_tratamiento(
+        p_idTratamiento IN TRATAMIENTO.idTratamiento%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_catalogos_tratamientos(
+        p_diagnosticos OUT SYS_REFCURSOR,
+        p_veterinarios OUT SYS_REFCURSOR,
+        p_servicios OUT SYS_REFCURSOR,
+        p_medicamentos OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_listar_medicamentos_tratamiento(
+        p_idTratamiento IN TRATAMIENTO.idTratamiento%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    );
     PROCEDURE pr_insertar_tratamiento(p_idTratamiento IN TRATAMIENTO.idTratamiento%TYPE, p_idDiagnostico IN TRATAMIENTO.idDiagnostico%TYPE,
         p_idVeterinario IN TRATAMIENTO.idVeterinario%TYPE, p_idServicio IN TRATAMIENTO.idServicio%TYPE, p_tipo IN TRATAMIENTO.tipo%TYPE,
         p_fechaInicio IN TRATAMIENTO.fechaInicio%TYPE, p_fechaFinEstimada IN TRATAMIENTO.fechaFinEstimada%TYPE,
@@ -1171,7 +1197,6 @@ END PKG_CONSULTAS_MEDICAS;
 /
 
 CREATE OR REPLACE PACKAGE BODY PKG_CONSULTAS_MEDICAS AS
-<<<<<<< HEAD
     PROCEDURE pr_listar_consultas(
         p_cursor OUT SYS_REFCURSOR
     ) IS
@@ -1344,75 +1369,6 @@ CREATE OR REPLACE PACKAGE BODY PKG_CONSULTAS_MEDICAS AS
                 SQLERRM
             );
     END pr_catalogos_consultas;
-=======
-
-    PROCEDURE pr_listar_diagnosticos(p_cursor OUT SYS_REFCURSOR) IS
-    BEGIN
-        OPEN p_cursor FOR
-            SELECT
-                TRIM(d.idDiagnostico)                        AS "id",
-                TRIM(d.idConsulta)                           AS "idConsulta",
-                d.descripcionCondicion                       AS "descripcionCondicion",
-                d.nivelGravedad                              AS "nivelGravedad",
-                d.tipoAfeccion                               AS "tipoAfeccion",
-                d.estado                                     AS "estado",
-                TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
-                TRIM(ci.idCita)                              AS "idCita",
-                ci.motivoConsulta                            AS "motivoConsulta",
-                TRIM(ma.codigoMascota)                       AS "mascotaId",
-                ma.nombre                                    AS "mascotaNombre",
-                ma.especie                                   AS "mascotaEspecie",
-                TRIM(cl.idCliente)                           AS "clienteId",
-                cl.nombreCompleto                            AS "clienteNombre",
-                TRIM(ev.idEmpleado)                          AS "veterinarioId",
-                ev.nombreCompleto                            AS "veterinarioNombre",
-                cs.nombre                                    AS "servicioNombre",
-                (SELECT COUNT(*) FROM TRATAMIENTO t WHERE t.idDiagnostico = d.idDiagnostico) AS "tratamientosCount"
-            FROM DIAGNOSTICO d
-            JOIN CONSULTA_VETERINARIA cv ON cv.idConsulta    = d.idConsulta
-            JOIN CITA               ci ON ci.idCita          = cv.idCita
-            JOIN MASCOTA            ma ON ma.codigoMascota   = ci.codigoMascota
-            JOIN CLIENTE            cl ON cl.idCliente       = ma.idCliente
-            JOIN EMPLEADO           ev ON ev.idEmpleado      = ci.idVeterinario
-            JOIN CATALOGO_SERVICIOS cs ON cs.idServicio      = cv.idServicio
-            ORDER BY cv.fechaAtencionReal DESC, d.idDiagnostico DESC;
-    EXCEPTION WHEN OTHERS THEN PKG_UTILIDADES.manejar('DIAGNOSTICO','LISTAR',SQLCODE,SQLERRM); END;
-
-    PROCEDURE pr_listar_consultas_catalogo(p_cursor OUT SYS_REFCURSOR) IS
-    BEGIN
-        OPEN p_cursor FOR
-            SELECT
-                TRIM(cv.idConsulta)                          AS "id",
-                TRIM(cv.idCita)                              AS "idCita",
-                TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
-                cv.observaciones                             AS "observaciones",
-                cv.recomendaciones                           AS "recomendaciones",
-                ma.nombre                                    AS "mascotaNombre",
-                ma.especie                                   AS "mascotaEspecie",
-                cl.nombreCompleto                            AS "clienteNombre",
-                ev.nombreCompleto                            AS "veterinarioNombre",
-                cs.nombre                                    AS "servicioNombre"
-            FROM CONSULTA_VETERINARIA cv
-            JOIN CITA               ci ON ci.idCita          = cv.idCita
-            JOIN MASCOTA            ma ON ma.codigoMascota   = ci.codigoMascota
-            JOIN CLIENTE            cl ON cl.idCliente       = ma.idCliente
-            JOIN EMPLEADO           ev ON ev.idEmpleado      = ci.idVeterinario
-            JOIN CATALOGO_SERVICIOS cs ON cs.idServicio      = cv.idServicio
-            ORDER BY cv.fechaAtencionReal DESC;
-    EXCEPTION WHEN OTHERS THEN PKG_UTILIDADES.manejar('CONSULTA_VETERINARIA','LISTAR_CATALOGO',SQLCODE,SQLERRM); END;
-
-    FUNCTION fn_generar_id_diagnostico RETURN VARCHAR2 IS
-        v_id VARCHAR2(12);
-    BEGIN
-        SELECT 'DIA' || LPAD(NVL(MAX(TO_NUMBER(REGEXP_SUBSTR(TRIM(idDiagnostico), '[0-9]+$'))), 0) + 1, 6, '0')
-        INTO v_id
-        FROM DIAGNOSTICO
-        WHERE REGEXP_LIKE(TRIM(idDiagnostico), '^DIA[0-9]+$');
-        RETURN v_id;
-    EXCEPTION WHEN OTHERS THEN PKG_UTILIDADES.manejar('DIAGNOSTICO','GEN_ID',SQLCODE,SQLERRM); END;
-
-
->>>>>>> 703f16cc5c278369c156709d0fd9e6a46e7a072e
     PROCEDURE pr_insertar_consulta(p_idConsulta IN CONSULTA_VETERINARIA.idConsulta%TYPE, p_idCita IN CONSULTA_VETERINARIA.idCita%TYPE,
         p_idServicio IN CONSULTA_VETERINARIA.idServicio%TYPE, p_temperatura IN CONSULTA_VETERINARIA.temperatura%TYPE,
         p_pesoConsulta IN CONSULTA_VETERINARIA.pesoConsulta%TYPE, p_observaciones IN CONSULTA_VETERINARIA.observaciones%TYPE,
@@ -1440,6 +1396,157 @@ CREATE OR REPLACE PACKAGE BODY PKG_CONSULTAS_MEDICAS AS
     BEGIN DELETE FROM CONSULTA_VETERINARIA WHERE idConsulta=p_idConsulta; p_filas_afectadas:=SQL%ROWCOUNT; IF p_filas_afectadas=0 THEN PKG_UTILIDADES.lanzar_no_encontrado('CONSULTA_VETERINARIA',p_idConsulta); END IF;
     EXCEPTION WHEN OTHERS THEN IF SQLCODE BETWEEN -20999 AND -20000 THEN RAISE; END IF; PKG_UTILIDADES.manejar('CONSULTA_VETERINARIA','ELIMINAR',SQLCODE,SQLERRM); END;
 
+        PROCEDURE pr_listar_diagnosticos(
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(d.idDiagnostico) AS "id",
+                TRIM(d.idConsulta) AS "idConsulta",
+                d.descripcionCondicion AS "descripcionCondicion",
+                d.nivelGravedad AS "nivelGravedad",
+                d.tipoAfeccion AS "tipoAfeccion",
+                d.estado AS "estado",
+
+                TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
+                TRIM(ci.idCita) AS "idCita",
+                ci.motivoConsulta AS "motivoConsulta",
+
+                TRIM(ma.codigoMascota) AS "mascotaId",
+                ma.nombre AS "mascotaNombre",
+                ma.especie AS "mascotaEspecie",
+
+                TRIM(cl.idCliente) AS "clienteId",
+                cl.nombreCompleto AS "clienteNombre",
+
+                TRIM(ev.idEmpleado) AS "veterinarioId",
+                ev.nombreCompleto AS "veterinarioNombre",
+
+                cs.nombre AS "servicioNombre",
+
+                (
+                    SELECT COUNT(*)
+                    FROM TRATAMIENTO t
+                    WHERE t.idDiagnostico = d.idDiagnostico
+                ) AS "tratamientosCount"
+            FROM DIAGNOSTICO d
+            JOIN CONSULTA_VETERINARIA cv ON cv.idConsulta = d.idConsulta
+            JOIN CITA ci ON ci.idCita = cv.idCita
+            JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
+            JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
+            JOIN EMPLEADO ev ON ev.idEmpleado = ci.idVeterinario
+            JOIN CATALOGO_SERVICIOS cs ON cs.idServicio = cv.idServicio
+            ORDER BY cv.fechaAtencionReal DESC, d.idDiagnostico DESC;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'DIAGNOSTICO',
+                'LISTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_diagnosticos;
+
+
+    PROCEDURE pr_obtener_diagnostico(
+        p_idDiagnostico IN DIAGNOSTICO.idDiagnostico%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(d.idDiagnostico) AS "id",
+                TRIM(d.idConsulta) AS "idConsulta",
+                d.descripcionCondicion AS "descripcionCondicion",
+                d.nivelGravedad AS "nivelGravedad",
+                d.tipoAfeccion AS "tipoAfeccion",
+                d.estado AS "estado",
+
+                TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
+                TRIM(ci.idCita) AS "idCita",
+                ci.motivoConsulta AS "motivoConsulta",
+
+                TRIM(ma.codigoMascota) AS "mascotaId",
+                ma.nombre AS "mascotaNombre",
+                ma.especie AS "mascotaEspecie",
+
+                TRIM(cl.idCliente) AS "clienteId",
+                cl.nombreCompleto AS "clienteNombre",
+
+                TRIM(ev.idEmpleado) AS "veterinarioId",
+                ev.nombreCompleto AS "veterinarioNombre",
+
+                cs.nombre AS "servicioNombre",
+
+                (
+                    SELECT COUNT(*)
+                    FROM TRATAMIENTO t
+                    WHERE t.idDiagnostico = d.idDiagnostico
+                ) AS "tratamientosCount"
+            FROM DIAGNOSTICO d
+            JOIN CONSULTA_VETERINARIA cv ON cv.idConsulta = d.idConsulta
+            JOIN CITA ci ON ci.idCita = cv.idCita
+            JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
+            JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
+            JOIN EMPLEADO ev ON ev.idEmpleado = ci.idVeterinario
+            JOIN CATALOGO_SERVICIOS cs ON cs.idServicio = cv.idServicio
+            WHERE TRIM(UPPER(d.idDiagnostico)) = TRIM(UPPER(p_idDiagnostico));
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'DIAGNOSTICO',
+                'OBTENER',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_obtener_diagnostico;
+
+
+    PROCEDURE pr_catalogos_diagnosticos(
+        p_consultas OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_consultas FOR
+            SELECT
+                TRIM(cv.idConsulta) AS "id",
+                TRIM(cv.idCita) AS "idCita",
+                TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
+                cv.observaciones AS "observaciones",
+                cv.recomendaciones AS "recomendaciones",
+                ma.nombre AS "mascotaNombre",
+                ma.especie AS "mascotaEspecie",
+                cl.nombreCompleto AS "clienteNombre",
+                ev.nombreCompleto AS "veterinarioNombre",
+                cs.nombre AS "servicioNombre"
+            FROM CONSULTA_VETERINARIA cv
+            JOIN CITA ci ON ci.idCita = cv.idCita
+            JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
+            JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
+            JOIN EMPLEADO ev ON ev.idEmpleado = ci.idVeterinario
+            JOIN CATALOGO_SERVICIOS cs ON cs.idServicio = cv.idServicio
+            ORDER BY cv.fechaAtencionReal DESC;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'DIAGNOSTICO',
+                'CATALOGOS',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_catalogos_diagnosticos;
     PROCEDURE pr_insertar_diagnostico(p_idDiagnostico IN DIAGNOSTICO.idDiagnostico%TYPE, p_idConsulta IN DIAGNOSTICO.idConsulta%TYPE,
         p_descripcionCondicion IN DIAGNOSTICO.descripcionCondicion%TYPE, p_nivelGravedad IN DIAGNOSTICO.nivelGravedad%TYPE,
         p_tipoAfeccion IN DIAGNOSTICO.tipoAfeccion%TYPE, p_estado IN DIAGNOSTICO.estado%TYPE,
@@ -1462,6 +1569,255 @@ CREATE OR REPLACE PACKAGE BODY PKG_CONSULTAS_MEDICAS AS
     BEGIN DELETE FROM DIAGNOSTICO WHERE idDiagnostico=p_idDiagnostico; p_filas_afectadas:=SQL%ROWCOUNT; IF p_filas_afectadas=0 THEN PKG_UTILIDADES.lanzar_no_encontrado('DIAGNOSTICO',p_idDiagnostico); END IF;
     EXCEPTION WHEN OTHERS THEN IF SQLCODE BETWEEN -20999 AND -20000 THEN RAISE; END IF; PKG_UTILIDADES.manejar('DIAGNOSTICO','ELIMINAR',SQLCODE,SQLERRM); END;
 
+    PROCEDURE pr_listar_tratamientos(
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(t.idTratamiento) AS "id",
+                TRIM(t.idDiagnostico) AS "idDiagnostico",
+                TRIM(t.idVeterinario) AS "idVeterinario",
+                TRIM(t.idServicio) AS "idServicio",
+                t.tipo AS "tipo",
+                TO_CHAR(t.fechaInicio, 'YYYY-MM-DD') AS "fechaInicio",
+                TO_CHAR(t.fechaFinEstimada, 'YYYY-MM-DD') AS "fechaFinEstimada",
+                t.indicaciones AS "indicaciones",
+                t.estado AS "estado",
+
+                d.descripcionCondicion AS "descripcionCondicion",
+                d.nivelGravedad AS "nivelGravedad",
+                d.tipoAfeccion AS "tipoAfeccion",
+                d.estado AS "diagnosticoEstado",
+
+                TRIM(cv.idConsulta) AS "idConsulta",
+                TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
+
+                ma.nombre AS "mascotaNombre",
+                ma.especie AS "mascotaEspecie",
+                cl.nombreCompleto AS "clienteNombre",
+
+                ev.nombreCompleto AS "veterinarioNombre",
+
+                cs.nombre AS "servicioNombre",
+                cs.tipoServicio AS "servicioTipo",
+                cs.precio AS "servicioPrecio",
+
+                (
+                    SELECT COUNT(*)
+                    FROM TRATAMIENTO_MEDICAMENTO tm
+                    WHERE tm.idTratamiento = t.idTratamiento
+                ) AS "medicamentosCount",
+
+                (
+                    SELECT LISTAGG(m.nombre, ', ') WITHIN GROUP (ORDER BY m.nombre)
+                    FROM TRATAMIENTO_MEDICAMENTO tm
+                    JOIN MEDICAMENTO m ON m.idMedicamento = tm.idMedicamento
+                    WHERE tm.idTratamiento = t.idTratamiento
+                ) AS "medicamentos"
+            FROM TRATAMIENTO t
+            JOIN DIAGNOSTICO d ON d.idDiagnostico = t.idDiagnostico
+            JOIN CONSULTA_VETERINARIA cv ON cv.idConsulta = d.idConsulta
+            JOIN CITA ci ON ci.idCita = cv.idCita
+            JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
+            JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
+            JOIN EMPLEADO ev ON ev.idEmpleado = t.idVeterinario
+            LEFT JOIN CATALOGO_SERVICIOS cs ON cs.idServicio = t.idServicio
+            ORDER BY t.fechaInicio DESC, t.idTratamiento DESC;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'TRATAMIENTO',
+                'LISTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_tratamientos;
+
+
+    PROCEDURE pr_obtener_tratamiento(
+        p_idTratamiento IN TRATAMIENTO.idTratamiento%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(t.idTratamiento) AS "id",
+                TRIM(t.idDiagnostico) AS "idDiagnostico",
+                TRIM(t.idVeterinario) AS "idVeterinario",
+                TRIM(t.idServicio) AS "idServicio",
+                t.tipo AS "tipo",
+                TO_CHAR(t.fechaInicio, 'YYYY-MM-DD') AS "fechaInicio",
+                TO_CHAR(t.fechaFinEstimada, 'YYYY-MM-DD') AS "fechaFinEstimada",
+                t.indicaciones AS "indicaciones",
+                t.estado AS "estado",
+
+                d.descripcionCondicion AS "descripcionCondicion",
+                d.nivelGravedad AS "nivelGravedad",
+                d.tipoAfeccion AS "tipoAfeccion",
+                d.estado AS "diagnosticoEstado",
+
+                TRIM(cv.idConsulta) AS "idConsulta",
+                TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
+
+                ma.nombre AS "mascotaNombre",
+                ma.especie AS "mascotaEspecie",
+                cl.nombreCompleto AS "clienteNombre",
+
+                ev.nombreCompleto AS "veterinarioNombre",
+
+                cs.nombre AS "servicioNombre",
+                cs.tipoServicio AS "servicioTipo",
+                cs.precio AS "servicioPrecio",
+
+                (
+                    SELECT COUNT(*)
+                    FROM TRATAMIENTO_MEDICAMENTO tm
+                    WHERE tm.idTratamiento = t.idTratamiento
+                ) AS "medicamentosCount",
+
+                (
+                    SELECT LISTAGG(m.nombre, ', ') WITHIN GROUP (ORDER BY m.nombre)
+                    FROM TRATAMIENTO_MEDICAMENTO tm
+                    JOIN MEDICAMENTO m ON m.idMedicamento = tm.idMedicamento
+                    WHERE tm.idTratamiento = t.idTratamiento
+                ) AS "medicamentos"
+            FROM TRATAMIENTO t
+            JOIN DIAGNOSTICO d ON d.idDiagnostico = t.idDiagnostico
+            JOIN CONSULTA_VETERINARIA cv ON cv.idConsulta = d.idConsulta
+            JOIN CITA ci ON ci.idCita = cv.idCita
+            JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
+            JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
+            JOIN EMPLEADO ev ON ev.idEmpleado = t.idVeterinario
+            LEFT JOIN CATALOGO_SERVICIOS cs ON cs.idServicio = t.idServicio
+            WHERE TRIM(UPPER(t.idTratamiento)) = TRIM(UPPER(p_idTratamiento));
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'TRATAMIENTO',
+                'OBTENER',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_obtener_tratamiento;
+
+
+    PROCEDURE pr_catalogos_tratamientos(
+        p_diagnosticos OUT SYS_REFCURSOR,
+        p_veterinarios OUT SYS_REFCURSOR,
+        p_servicios OUT SYS_REFCURSOR,
+        p_medicamentos OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_diagnosticos FOR
+            SELECT
+                TRIM(d.idDiagnostico) AS "id",
+                TRIM(d.idConsulta) AS "idConsulta",
+                d.descripcionCondicion AS "descripcionCondicion",
+                d.nivelGravedad AS "nivelGravedad",
+                d.tipoAfeccion AS "tipoAfeccion",
+                d.estado AS "estado",
+                TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
+                ma.nombre AS "mascotaNombre",
+                ma.especie AS "mascotaEspecie",
+                cl.nombreCompleto AS "clienteNombre",
+                ev.nombreCompleto AS "veterinarioConsultaNombre"
+            FROM DIAGNOSTICO d
+            JOIN CONSULTA_VETERINARIA cv ON cv.idConsulta = d.idConsulta
+            JOIN CITA ci ON ci.idCita = cv.idCita
+            JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
+            JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
+            JOIN EMPLEADO ev ON ev.idEmpleado = ci.idVeterinario
+            ORDER BY cv.fechaAtencionReal DESC, d.idDiagnostico DESC;
+
+        OPEN p_veterinarios FOR
+            SELECT
+                TRIM(v.idEmpleado) AS "id",
+                e.nombreCompleto AS "nombre",
+                e.telefono AS "telefono",
+                v.especialidad AS "especialidad",
+                v.nroMatricula AS "nroMatricula"
+            FROM VETERINARIO v
+            JOIN EMPLEADO e ON e.idEmpleado = v.idEmpleado
+            WHERE e.estadoLaboral = 'ACTIVO'
+            ORDER BY e.nombreCompleto;
+
+        OPEN p_servicios FOR
+            SELECT
+                TRIM(idServicio) AS "id",
+                nombre AS "nombre",
+                tipoServicio AS "tipoServicio",
+                precio AS "precio",
+                descripcion AS "descripcion",
+                activo AS "activo"
+            FROM CATALOGO_SERVICIOS
+            WHERE activo = 'S'
+            ORDER BY nombre;
+
+        OPEN p_medicamentos FOR
+            SELECT
+                TRIM(idMedicamento) AS "id",
+                nombre AS "nombre",
+                descripcion AS "descripcion",
+                precioUnitario AS "precioUnitario"
+            FROM MEDICAMENTO
+            ORDER BY nombre;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'TRATAMIENTO',
+                'CATALOGOS',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_catalogos_tratamientos;
+
+
+    PROCEDURE pr_listar_medicamentos_tratamiento(
+        p_idTratamiento IN TRATAMIENTO.idTratamiento%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(tm.idTratamiento) AS "idTratamiento",
+                TRIM(tm.idMedicamento) AS "idMedicamento",
+                tm.dosis AS "dosis",
+                tm.frecuencia AS "frecuencia",
+                tm.viaAdministracion AS "viaAdministracion",
+                tm.duracion AS "duracion",
+                m.nombre AS "medicamentoNombre",
+                m.descripcion AS "medicamentoDescripcion",
+                m.precioUnitario AS "precioUnitario"
+            FROM TRATAMIENTO_MEDICAMENTO tm
+            JOIN MEDICAMENTO m ON m.idMedicamento = tm.idMedicamento
+            WHERE TRIM(UPPER(tm.idTratamiento)) = TRIM(UPPER(p_idTratamiento))
+            ORDER BY m.nombre;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'TRATAMIENTO_MEDICAMENTO',
+                'LISTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_medicamentos_tratamiento;
     PROCEDURE pr_insertar_tratamiento(p_idTratamiento IN TRATAMIENTO.idTratamiento%TYPE, p_idDiagnostico IN TRATAMIENTO.idDiagnostico%TYPE,
         p_idVeterinario IN TRATAMIENTO.idVeterinario%TYPE, p_idServicio IN TRATAMIENTO.idServicio%TYPE, p_tipo IN TRATAMIENTO.tipo%TYPE,
         p_fechaInicio IN TRATAMIENTO.fechaInicio%TYPE, p_fechaFinEstimada IN TRATAMIENTO.fechaFinEstimada%TYPE,
@@ -2061,6 +2417,28 @@ END PKG_SERVICIOS;
 -- 9. PKG_FACTURACION
 -- ============================================================
 CREATE OR REPLACE PACKAGE PKG_FACTURACION AS
+    PROCEDURE pr_listar_facturas(
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_obtener_factura(
+        p_idFactura IN FACTURA.idFactura%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_catalogos_facturacion(
+        p_consultas OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_listar_detalles_factura(
+        p_idFactura IN DETALLE_FACTURA.idFactura%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_obtener_consulta_facturacion(
+        p_idConsulta IN CONSULTA_VETERINARIA.idConsulta%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    );
     PROCEDURE pr_insertar_factura(p_idFactura IN FACTURA.idFactura%TYPE, p_idConsulta IN FACTURA.idConsulta%TYPE,
         p_idCliente IN FACTURA.idCliente%TYPE, p_fecha IN FACTURA.fecha%TYPE, p_valorTotal IN FACTURA.valorTotal%TYPE,
         p_metodoPago IN FACTURA.metodoPago%TYPE, p_estadoPago IN FACTURA.estadoPago%TYPE, p_idFactura_out OUT FACTURA.idFactura%TYPE);
@@ -2088,6 +2466,245 @@ END PKG_FACTURACION;
 /
 
 CREATE OR REPLACE PACKAGE BODY PKG_FACTURACION AS
+    PROCEDURE pr_listar_facturas(
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(f.idFactura) AS "id",
+                TRIM(f.idConsulta) AS "idConsulta",
+                TRIM(f.idCliente) AS "idCliente",
+                TO_CHAR(f.fecha, 'YYYY-MM-DD') AS "fecha",
+                f.valorTotal AS "valorTotal",
+                f.metodoPago AS "metodoPago",
+                f.estadoPago AS "estadoPago",
+
+                cl.nombreCompleto AS "clienteNombre",
+                cl.telefono AS "clienteTelefono",
+                cl.correoElectronico AS "clienteEmail",
+
+                TRIM(ci.idCita) AS "idCita",
+                TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
+
+                TRIM(ma.codigoMascota) AS "mascotaId",
+                ma.nombre AS "mascotaNombre",
+                ma.especie AS "mascotaEspecie",
+
+                cs.nombre AS "servicioNombre",
+                cs.tipoServicio AS "servicioTipo",
+                cs.precio AS "servicioPrecio",
+
+                (
+                    SELECT COUNT(*)
+                    FROM DETALLE_FACTURA d
+                    WHERE d.idFactura = f.idFactura
+                ) AS "detallesCount",
+
+                (
+                    SELECT NVL(SUM(d.cantidad * d.precioUnitario), 0)
+                    FROM DETALLE_FACTURA d
+                    WHERE d.idFactura = f.idFactura
+                ) AS "totalCalculado"
+            FROM FACTURA f
+            JOIN CLIENTE cl ON cl.idCliente = f.idCliente
+            JOIN CONSULTA_VETERINARIA cv ON cv.idConsulta = f.idConsulta
+            JOIN CITA ci ON ci.idCita = cv.idCita
+            JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
+            JOIN CATALOGO_SERVICIOS cs ON cs.idServicio = cv.idServicio
+            ORDER BY f.fecha DESC, f.idFactura DESC;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'FACTURA',
+                'LISTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_facturas;
+
+
+    PROCEDURE pr_obtener_factura(
+        p_idFactura IN FACTURA.idFactura%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(f.idFactura) AS "id",
+                TRIM(f.idConsulta) AS "idConsulta",
+                TRIM(f.idCliente) AS "idCliente",
+                TO_CHAR(f.fecha, 'YYYY-MM-DD') AS "fecha",
+                f.valorTotal AS "valorTotal",
+                f.metodoPago AS "metodoPago",
+                f.estadoPago AS "estadoPago",
+
+                cl.nombreCompleto AS "clienteNombre",
+                cl.telefono AS "clienteTelefono",
+                cl.correoElectronico AS "clienteEmail",
+
+                TRIM(ci.idCita) AS "idCita",
+                TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
+
+                TRIM(ma.codigoMascota) AS "mascotaId",
+                ma.nombre AS "mascotaNombre",
+                ma.especie AS "mascotaEspecie",
+
+                cs.nombre AS "servicioNombre",
+                cs.tipoServicio AS "servicioTipo",
+                cs.precio AS "servicioPrecio",
+
+                (
+                    SELECT COUNT(*)
+                    FROM DETALLE_FACTURA d
+                    WHERE d.idFactura = f.idFactura
+                ) AS "detallesCount",
+
+                (
+                    SELECT NVL(SUM(d.cantidad * d.precioUnitario), 0)
+                    FROM DETALLE_FACTURA d
+                    WHERE d.idFactura = f.idFactura
+                ) AS "totalCalculado"
+            FROM FACTURA f
+            JOIN CLIENTE cl ON cl.idCliente = f.idCliente
+            JOIN CONSULTA_VETERINARIA cv ON cv.idConsulta = f.idConsulta
+            JOIN CITA ci ON ci.idCita = cv.idCita
+            JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
+            JOIN CATALOGO_SERVICIOS cs ON cs.idServicio = cv.idServicio
+            WHERE TRIM(UPPER(f.idFactura)) = TRIM(UPPER(p_idFactura));
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'FACTURA',
+                'OBTENER',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_obtener_factura;
+
+
+    PROCEDURE pr_catalogos_facturacion(
+        p_consultas OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_consultas FOR
+            SELECT
+                TRIM(cv.idConsulta) AS "id",
+                TRIM(ci.idCita) AS "idCita",
+                TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
+
+                TRIM(cl.idCliente) AS "clienteId",
+                cl.nombreCompleto AS "clienteNombre",
+                cl.telefono AS "clienteTelefono",
+
+                TRIM(ma.codigoMascota) AS "mascotaId",
+                ma.nombre AS "mascotaNombre",
+                ma.especie AS "mascotaEspecie",
+
+                TRIM(cs.idServicio) AS "servicioId",
+                cs.nombre AS "servicioNombre",
+                cs.tipoServicio AS "servicioTipo",
+                cs.precio AS "servicioPrecio"
+            FROM CONSULTA_VETERINARIA cv
+            JOIN CITA ci ON ci.idCita = cv.idCita
+            JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
+            JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
+            JOIN CATALOGO_SERVICIOS cs ON cs.idServicio = cv.idServicio
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM FACTURA f
+                WHERE f.idConsulta = cv.idConsulta
+            )
+            ORDER BY cv.fechaAtencionReal DESC;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'FACTURA',
+                'CATALOGOS',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_catalogos_facturacion;
+
+
+    PROCEDURE pr_listar_detalles_factura(
+        p_idFactura IN DETALLE_FACTURA.idFactura%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(idDetalle) AS "id",
+                TRIM(idFactura) AS "idFactura",
+                descripcion AS "descripcion",
+                tipoConcepto AS "tipoConcepto",
+                cantidad AS "cantidad",
+                precioUnitario AS "precioUnitario",
+                cantidad * precioUnitario AS "subtotal"
+            FROM DETALLE_FACTURA
+            WHERE TRIM(UPPER(idFactura)) = TRIM(UPPER(p_idFactura))
+            ORDER BY tipoConcepto, descripcion;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'DETALLE_FACTURA',
+                'LISTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_detalles_factura;
+
+
+    PROCEDURE pr_obtener_consulta_facturacion(
+        p_idConsulta IN CONSULTA_VETERINARIA.idConsulta%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(cv.idConsulta) AS "idConsulta",
+                TRIM(ci.idCita) AS "idCita",
+                TRIM(cl.idCliente) AS "idCliente",
+                cl.nombreCompleto AS "clienteNombre",
+                ma.nombre AS "mascotaNombre",
+                ma.especie AS "mascotaEspecie",
+                cs.nombre AS "servicioNombre",
+                cs.precio AS "servicioPrecio"
+            FROM CONSULTA_VETERINARIA cv
+            JOIN CITA ci ON ci.idCita = cv.idCita
+            JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
+            JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
+            JOIN CATALOGO_SERVICIOS cs ON cs.idServicio = cv.idServicio
+            WHERE TRIM(UPPER(cv.idConsulta)) = TRIM(UPPER(p_idConsulta));
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'CONSULTA_VETERINARIA',
+                'OBTENER PARA FACTURA',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_obtener_consulta_facturacion;
     PROCEDURE pr_insertar_factura(p_idFactura IN FACTURA.idFactura%TYPE, p_idConsulta IN FACTURA.idConsulta%TYPE,
         p_idCliente IN FACTURA.idCliente%TYPE, p_fecha IN FACTURA.fecha%TYPE, p_valorTotal IN FACTURA.valorTotal%TYPE,
         p_metodoPago IN FACTURA.metodoPago%TYPE, p_estadoPago IN FACTURA.estadoPago%TYPE, p_idFactura_out OUT FACTURA.idFactura%TYPE) IS
@@ -2186,6 +2803,276 @@ CREATE OR REPLACE PACKAGE BODY PKG_AUDITORIA AS
     BEGIN INSERT INTO LOG_AUDITORIA (idLog,tabla,operacion,idRegistro,datosAntes,usuario,fechaHora) VALUES (SEQ_LOG_AUDITORIA.NEXTVAL,UPPER(p_tabla),'ELIMINAR',p_idRegistro,p_datos_json,p_usuario,SYSTIMESTAMP); COMMIT;
     EXCEPTION WHEN OTHERS THEN ROLLBACK; END;
 END PKG_AUDITORIA;
+/
+
+-- ============================================================
+-- 12. PKG_DASHBOARD
+-- ============================================================
+CREATE OR REPLACE PACKAGE PKG_DASHBOARD AS
+
+    PROCEDURE pr_resumen_dashboard(
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_citas_hoy(
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_actividad_reciente(
+        p_limite IN NUMBER DEFAULT 10,
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+END PKG_DASHBOARD;
+/
+
+CREATE OR REPLACE PACKAGE BODY PKG_DASHBOARD AS
+
+    PROCEDURE pr_resumen_dashboard(
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                (SELECT COUNT(*) FROM CLIENTE) AS "totalClientes",
+                (SELECT COUNT(*) FROM CLIENTE WHERE estado = 'ACTIVO') AS "clientesActivos",
+                (SELECT COUNT(*) FROM MASCOTA) AS "totalMascotas",
+                (SELECT COUNT(*) FROM EMPLEADO WHERE estadoLaboral = 'ACTIVO') AS "empleadosActivos",
+
+                (
+                    SELECT COUNT(*)
+                    FROM CITA
+                    WHERE TRUNC(fecha) = TRUNC(SYSDATE)
+                ) AS "citasHoy",
+
+                (
+                    SELECT COUNT(*)
+                    FROM CITA
+                    WHERE estadoCita IN ('PROGRAMADA', 'CONFIRMADA')
+                      AND fecha >= TRUNC(SYSDATE)
+                ) AS "citasPendientes",
+
+                (
+                    SELECT COUNT(*)
+                    FROM CONSULTA_VETERINARIA
+                    WHERE fechaAtencionReal >= TRUNC(SYSDATE, 'MM')
+                      AND fechaAtencionReal < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)
+                ) AS "consultasMes",
+
+                (
+                    SELECT COUNT(*)
+                    FROM TRATAMIENTO
+                    WHERE estado = 'ACTIVO'
+                ) AS "tratamientosActivos",
+
+                (
+                    SELECT COUNT(*)
+                    FROM FACTURA
+                    WHERE estadoPago = 'PENDIENTE'
+                ) AS "facturasPendientes",
+
+                (
+                    SELECT NVL(SUM(valorTotal), 0)
+                    FROM FACTURA
+                    WHERE estadoPago = 'PAGADA'
+                      AND TRUNC(fecha) = TRUNC(SYSDATE)
+                ) AS "ingresosHoy",
+
+                (
+                    SELECT NVL(SUM(valorTotal), 0)
+                    FROM FACTURA
+                    WHERE estadoPago = 'PAGADA'
+                      AND fecha >= TRUNC(SYSDATE, 'MM')
+                      AND fecha < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)
+                ) AS "ingresosMes",
+
+                (
+                    SELECT NVL(SUM(valorTotal), 0)
+                    FROM FACTURA
+                    WHERE estadoPago = 'PAGADA'
+                ) AS "ingresosTotal",
+
+                (
+                    SELECT COUNT(*)
+                    FROM APLICACION_VACUNA
+                    WHERE fechaAplicacion >= TRUNC(SYSDATE, 'MM')
+                      AND fechaAplicacion < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)
+                ) AS "vacunasMes"
+            FROM dual;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'DASHBOARD',
+                'RESUMEN',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_resumen_dashboard;
+
+
+    PROCEDURE pr_citas_hoy(
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(ci.idCita) AS "id",
+                TO_CHAR(ci.fecha, 'YYYY-MM-DD') AS "fecha",
+                TO_CHAR(EXTRACT(HOUR FROM ci.hora), 'FM00') || ':' ||
+                TO_CHAR(EXTRACT(MINUTE FROM ci.hora), 'FM00') AS "hora",
+                ci.motivoConsulta AS "motivo",
+                ci.estadoCita AS "estado",
+
+                TRIM(ma.codigoMascota) AS "mascotaId",
+                ma.nombre AS "mascotaNombre",
+                ma.especie AS "mascotaEspecie",
+
+                TRIM(cl.idCliente) AS "clienteId",
+                cl.nombreCompleto AS "clienteNombre",
+                cl.telefono AS "clienteTelefono",
+
+                TRIM(ev.idEmpleado) AS "veterinarioId",
+                ev.nombreCompleto AS "veterinarioNombre"
+            FROM CITA ci
+            JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
+            JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
+            JOIN EMPLEADO ev ON ev.idEmpleado = ci.idVeterinario
+            WHERE TRUNC(ci.fecha) = TRUNC(SYSDATE)
+            ORDER BY ci.hora;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'DASHBOARD',
+                'CITAS HOY',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_citas_hoy;
+
+
+    PROCEDURE pr_actividad_reciente(
+        p_limite IN NUMBER DEFAULT 10,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+        v_limite NUMBER;
+    BEGIN
+        v_limite := LEAST(GREATEST(NVL(p_limite, 10), 1), 30);
+
+        OPEN p_cursor FOR
+            SELECT
+                tipo AS "tipo",
+                id AS "id",
+                titulo AS "titulo",
+                descripcion AS "descripcion",
+                fecha AS "fecha",
+                hora AS "hora",
+                estado AS "estado"
+            FROM (
+                SELECT
+                    'CITA' AS tipo,
+                    TRIM(ci.idCita) AS id,
+                    'Cita ' || ci.estadoCita AS titulo,
+                    ma.nombre || ' · ' || cl.nombreCompleto AS descripcion,
+                    TO_CHAR(ci.fecha, 'YYYY-MM-DD') AS fecha,
+                    TO_CHAR(EXTRACT(HOUR FROM ci.hora), 'FM00') || ':' ||
+                    TO_CHAR(EXTRACT(MINUTE FROM ci.hora), 'FM00') AS hora,
+                    ci.estadoCita AS estado,
+                    CAST(ci.fecha AS TIMESTAMP) AS fechaOrden
+                FROM CITA ci
+                JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
+                JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
+
+                UNION ALL
+
+                SELECT
+                    'CONSULTA' AS tipo,
+                    TRIM(cv.idConsulta) AS id,
+                    'Consulta veterinaria' AS titulo,
+                    ma.nombre || ' · ' || cl.nombreCompleto AS descripcion,
+                    TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS fecha,
+                    NULL AS hora,
+                    'ATENDIDA' AS estado,
+                    CAST(cv.fechaAtencionReal AS TIMESTAMP) AS fechaOrden
+                FROM CONSULTA_VETERINARIA cv
+                JOIN CITA ci ON ci.idCita = cv.idCita
+                JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
+                JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
+
+                UNION ALL
+
+                SELECT
+                    'FACTURA' AS tipo,
+                    TRIM(f.idFactura) AS id,
+                    'Factura ' || f.estadoPago AS titulo,
+                    cl.nombreCompleto || ' · $' ||
+                    TO_CHAR(f.valorTotal, 'FM999G999G999G990D00') AS descripcion,
+                    TO_CHAR(f.fecha, 'YYYY-MM-DD') AS fecha,
+                    NULL AS hora,
+                    f.estadoPago AS estado,
+                    CAST(f.fecha AS TIMESTAMP) AS fechaOrden
+                FROM FACTURA f
+                JOIN CLIENTE cl ON cl.idCliente = f.idCliente
+
+                UNION ALL
+
+                SELECT
+                    'VACUNA' AS tipo,
+                    TRIM(av.idVacuna) AS id,
+                    'Vacuna aplicada' AS titulo,
+                    ma.nombre || ' · ' || v.nombre AS descripcion,
+                    TO_CHAR(av.fechaAplicacion, 'YYYY-MM-DD') AS fecha,
+                    NULL AS hora,
+                    'APLICADA' AS estado,
+                    CAST(av.fechaAplicacion AS TIMESTAMP) AS fechaOrden
+                FROM APLICACION_VACUNA av
+                JOIN MASCOTA ma ON ma.codigoMascota = av.codigoMascota
+                JOIN VACUNA v ON v.idVacuna = av.idVacuna
+
+                UNION ALL
+
+                SELECT
+                    'TRATAMIENTO' AS tipo,
+                    TRIM(t.idTratamiento) AS id,
+                    'Tratamiento ' || NVL(t.estado, 'SIN ESTADO') AS titulo,
+                    ma.nombre || ' · ' || t.tipo AS descripcion,
+                    TO_CHAR(t.fechaInicio, 'YYYY-MM-DD') AS fecha,
+                    NULL AS hora,
+                    NVL(t.estado, 'SIN ESTADO') AS estado,
+                    CAST(t.fechaInicio AS TIMESTAMP) AS fechaOrden
+                FROM TRATAMIENTO t
+                JOIN DIAGNOSTICO d ON d.idDiagnostico = t.idDiagnostico
+                JOIN CONSULTA_VETERINARIA cv ON cv.idConsulta = d.idConsulta
+                JOIN CITA ci ON ci.idCita = cv.idCita
+                JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
+            )
+            ORDER BY fechaOrden DESC
+            FETCH FIRST v_limite ROWS ONLY;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'DASHBOARD',
+                'ACTIVIDAD RECIENTE',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_actividad_reciente;
+
+END PKG_DASHBOARD;
 /
 
 

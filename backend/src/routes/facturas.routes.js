@@ -2,7 +2,17 @@ const express = require("express");
 const router = express.Router();
 const { getConnection } = require("../db");
 
+const {
+    cursorToRows,
+    outCursor,
+    outNumber,
+    outString,
+    normalizarTexto,
+    normalizarId,
+} = require("../plsql");
+
 const estadosPagoValidos = ["PENDIENTE", "PAGADA", "ANULADA"];
+
 const tiposConceptoValidos = [
     "CONSULTA",
     "MEDICAMENTO",
@@ -15,12 +25,9 @@ function esFechaValida(fecha) {
     return /^\d{4}-\d{2}-\d{2}$/.test(fecha || "");
 }
 
-function normalizarTexto(valor) {
-    return valor?.trim() || null;
-}
-
 function normalizarNumero(valor) {
     if (valor === null || valor === undefined || valor === "") return null;
+
     const numero = Number(valor);
     return Number.isFinite(numero) ? numero : NaN;
 }
@@ -81,6 +88,13 @@ function manejarErrorOracle(error, res, mensajeBase) {
         });
     }
 
+    if (error.errorNum === 20001 || error.errorNum === 20999) {
+        return res.status(404).json({
+            message: "Registro no encontrado.",
+            error: error.message,
+        });
+    }
+
     if (error.errorNum === 2291) {
         return res.status(400).json({
             message: "La consulta, cliente o factura seleccionada no existe.",
@@ -116,125 +130,81 @@ function manejarErrorOracle(error, res, mensajeBase) {
     });
 }
 
-async function generarIdFactura(connection) {
-    const result = await connection.execute(`
-    SELECT
-      'FAC' ||
-      LPAD(
-        NVL(MAX(TO_NUMBER(REGEXP_SUBSTR(TRIM(idFactura), '[0-9]+$'))), 0) + 1,
-        6,
-        '0'
-      ) AS "id"
-    FROM FACTURA
-    WHERE REGEXP_LIKE(TRIM(idFactura), '^FAC[0-9]+$')
-  `);
+async function obtenerConsultaParaFactura(connection, idConsulta) {
+    const result = await connection.execute(
+        `
+        BEGIN
+            PKG_FACTURACION.pr_obtener_consulta_facturacion(
+                :p_idConsulta,
+                :p_cursor
+            );
+        END;
+        `,
+        {
+            p_idConsulta: normalizarId(idConsulta),
+            p_cursor: outCursor(),
+        }
+    );
 
-    return result.rows[0].id;
-}
-
-async function generarIdDetalle(connection) {
-    const result = await connection.execute(`
-    SELECT
-      'DET' ||
-      LPAD(
-        NVL(MAX(TO_NUMBER(REGEXP_SUBSTR(TRIM(idDetalle), '[0-9]+$'))), 0) + 1,
-        8,
-        '0'
-      ) AS "id"
-    FROM DETALLE_FACTURA
-    WHERE REGEXP_LIKE(TRIM(idDetalle), '^DET[0-9]+$')
-  `);
-
-    return result.rows[0].id;
+    const rows = await cursorToRows(result.outBinds.p_cursor);
+    return rows[0] || null;
 }
 
 async function recalcularTotalFactura(connection, idFactura) {
     await connection.execute(
         `
-    UPDATE FACTURA f
-    SET valorTotal = (
-      SELECT NVL(SUM(d.cantidad * d.precioUnitario), 0)
-      FROM DETALLE_FACTURA d
-      WHERE d.idFactura = f.idFactura
-    )
-    WHERE f.idFactura = :idFactura
-    `,
-        { idFactura }
+        BEGIN
+            PKG_FACTURACION.pr_recalcular_total_factura(
+                :p_idFactura,
+                :p_filas_afectadas
+            );
+        END;
+        `,
+        {
+            p_idFactura: normalizarId(idFactura),
+            p_filas_afectadas: outNumber(),
+        }
     );
 
     const result = await connection.execute(
         `
-    SELECT valorTotal AS "valorTotal"
-    FROM FACTURA
-    WHERE idFactura = :idFactura
-    `,
-        { idFactura }
+        BEGIN
+            :p_total := PKG_FACTURACION.fn_total_factura(:p_idFactura);
+        END;
+        `,
+        {
+            p_idFactura: normalizarId(idFactura),
+            p_total: outNumber(),
+        }
     );
 
-    return result.rows[0]?.valorTotal || 0;
+    return result.outBinds.p_total || 0;
 }
 
-async function obtenerConsultaParaFactura(connection, idConsulta) {
-    const result = await connection.execute(
-        `
-    SELECT
-      TRIM(cv.idConsulta) AS "idConsulta",
-      TRIM(ci.idCita) AS "idCita",
-      TRIM(cl.idCliente) AS "idCliente",
-      cl.nombreCompleto AS "clienteNombre",
-      ma.nombre AS "mascotaNombre",
-      ma.especie AS "mascotaEspecie",
-      cs.nombre AS "servicioNombre",
-      cs.precio AS "servicioPrecio"
-    FROM CONSULTA_VETERINARIA cv
-    JOIN CITA ci ON ci.idCita = cv.idCita
-    JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
-    JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
-    JOIN CATALOGO_SERVICIOS cs ON cs.idServicio = cv.idServicio
-    WHERE cv.idConsulta = :idConsulta
-    `,
-        { idConsulta }
-    );
-
-    return result.rows[0] || null;
-}
-
+/**
+ * GET /api/facturas/catalogos
+ */
 router.get("/catalogos", async (req, res) => {
     let connection;
 
     try {
         connection = await getConnection();
 
-        const consultasResult = await connection.execute(`
-      SELECT
-        TRIM(cv.idConsulta) AS "id",
-        TRIM(ci.idCita) AS "idCita",
-        TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
-        TRIM(cl.idCliente) AS "clienteId",
-        cl.nombreCompleto AS "clienteNombre",
-        cl.telefono AS "clienteTelefono",
-        TRIM(ma.codigoMascota) AS "mascotaId",
-        ma.nombre AS "mascotaNombre",
-        ma.especie AS "mascotaEspecie",
-        TRIM(cs.idServicio) AS "servicioId",
-        cs.nombre AS "servicioNombre",
-        cs.tipoServicio AS "servicioTipo",
-        cs.precio AS "servicioPrecio"
-      FROM CONSULTA_VETERINARIA cv
-      JOIN CITA ci ON ci.idCita = cv.idCita
-      JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
-      JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
-      JOIN CATALOGO_SERVICIOS cs ON cs.idServicio = cv.idServicio
-      WHERE NOT EXISTS (
-        SELECT 1
-        FROM FACTURA f
-        WHERE f.idConsulta = cv.idConsulta
-      )
-      ORDER BY cv.fechaAtencionReal DESC
-    `);
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_FACTURACION.pr_catalogos_facturacion(:p_consultas);
+            END;
+            `,
+            {
+                p_consultas: outCursor(),
+            }
+        );
+
+        const consultasDisponibles = await cursorToRows(result.outBinds.p_consultas);
 
         res.json({
-            consultasDisponibles: consultasResult.rows,
+            consultasDisponibles,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando catálogos de facturación");
@@ -243,58 +213,29 @@ router.get("/catalogos", async (req, res) => {
     }
 });
 
+/**
+ * GET /api/facturas
+ */
 router.get("/", async (req, res) => {
     let connection;
 
     try {
         connection = await getConnection();
 
-        const result = await connection.execute(`
-      SELECT
-        TRIM(f.idFactura) AS "id",
-        TRIM(f.idConsulta) AS "idConsulta",
-        TRIM(f.idCliente) AS "idCliente",
-        TO_CHAR(f.fecha, 'YYYY-MM-DD') AS "fecha",
-        f.valorTotal AS "valorTotal",
-        f.metodoPago AS "metodoPago",
-        f.estadoPago AS "estadoPago",
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_FACTURACION.pr_listar_facturas(:p_cursor);
+            END;
+            `,
+            {
+                p_cursor: outCursor(),
+            }
+        );
 
-        cl.nombreCompleto AS "clienteNombre",
-        cl.telefono AS "clienteTelefono",
-        cl.correoElectronico AS "clienteEmail",
+        const rows = await cursorToRows(result.outBinds.p_cursor);
 
-        TRIM(ci.idCita) AS "idCita",
-        TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
-
-        TRIM(ma.codigoMascota) AS "mascotaId",
-        ma.nombre AS "mascotaNombre",
-        ma.especie AS "mascotaEspecie",
-
-        cs.nombre AS "servicioNombre",
-        cs.tipoServicio AS "servicioTipo",
-        cs.precio AS "servicioPrecio",
-
-        (
-          SELECT COUNT(*)
-          FROM DETALLE_FACTURA d
-          WHERE d.idFactura = f.idFactura
-        ) AS "detallesCount",
-
-        (
-          SELECT NVL(SUM(d.cantidad * d.precioUnitario), 0)
-          FROM DETALLE_FACTURA d
-          WHERE d.idFactura = f.idFactura
-        ) AS "totalCalculado"
-      FROM FACTURA f
-      JOIN CLIENTE cl ON cl.idCliente = f.idCliente
-      JOIN CONSULTA_VETERINARIA cv ON cv.idConsulta = f.idConsulta
-      JOIN CITA ci ON ci.idCita = cv.idCita
-      JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
-      JOIN CATALOGO_SERVICIOS cs ON cs.idServicio = cv.idServicio
-      ORDER BY f.fecha DESC, f.idFactura DESC
-    `);
-
-        res.json(result.rows);
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando facturas");
     } finally {
@@ -302,6 +243,51 @@ router.get("/", async (req, res) => {
     }
 });
 
+/**
+ * GET /api/facturas/:id
+ */
+router.get("/:id", async (req, res) => {
+    let connection;
+
+    const id = normalizarId(req.params.id);
+
+    try {
+        connection = await getConnection();
+
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_FACTURACION.pr_obtener_factura(
+                    :p_idFactura,
+                    :p_cursor
+                );
+            END;
+            `,
+            {
+                p_idFactura: id,
+                p_cursor: outCursor(),
+            }
+        );
+
+        const rows = await cursorToRows(result.outBinds.p_cursor);
+
+        if (rows.length === 0) {
+            return res.status(404).json({
+                message: "Factura no encontrada",
+            });
+        }
+
+        res.json(rows[0]);
+    } catch (error) {
+        manejarErrorOracle(error, res, "Error consultando factura");
+    } finally {
+        if (connection) await connection.close();
+    }
+});
+
+/**
+ * POST /api/facturas
+ */
 router.post("/", async (req, res) => {
     let connection;
 
@@ -323,10 +309,7 @@ router.post("/", async (req, res) => {
     try {
         connection = await getConnection();
 
-        const consulta = await obtenerConsultaParaFactura(
-            connection,
-            idConsulta.trim()
-        );
+        const consulta = await obtenerConsultaParaFactura(connection, idConsulta);
 
         if (!consulta) {
             return res.status(404).json({
@@ -334,64 +317,58 @@ router.post("/", async (req, res) => {
             });
         }
 
-        const idFactura = normalizarTexto(id) || (await generarIdFactura(connection));
-
-        await connection.execute(
+        const result = await connection.execute(
             `
-      INSERT INTO FACTURA (
-        idFactura,
-        idConsulta,
-        idCliente,
-        fecha,
-        valorTotal,
-        metodoPago,
-        estadoPago
-      ) VALUES (
-        :idFactura,
-        :idConsulta,
-        :idCliente,
-        TO_DATE(:fecha, 'YYYY-MM-DD'),
-        0,
-        :metodoPago,
-        :estadoPago
-      )
-      `,
+            BEGIN
+                PKG_FACTURACION.pr_insertar_factura(
+                    :p_idFactura,
+                    :p_idConsulta,
+                    :p_idCliente,
+                    TO_DATE(:p_fecha, 'YYYY-MM-DD'),
+                    :p_valorTotal,
+                    :p_metodoPago,
+                    :p_estadoPago,
+                    :p_idFactura_out
+                );
+            END;
+            `,
             {
-                idFactura,
-                idConsulta: consulta.idConsulta,
-                idCliente: consulta.idCliente,
-                fecha,
-                metodoPago: normalizarTexto(metodoPago),
-                estadoPago,
+                p_idFactura: normalizarTexto(id),
+                p_idConsulta: consulta.idConsulta || consulta.IDCONSULTA,
+                p_idCliente: consulta.idCliente || consulta.IDCLIENTE,
+                p_fecha: fecha,
+                p_valorTotal: 0,
+                p_metodoPago: normalizarTexto(metodoPago),
+                p_estadoPago: estadoPago,
+                p_idFactura_out: outString(30),
             }
         );
 
-        if (crearDetalleConsulta && Number(consulta.servicioPrecio || 0) >= 0) {
-            const idDetalle = await generarIdDetalle(connection);
+        const idFactura = result.outBinds.p_idFactura_out;
 
+        if (crearDetalleConsulta && Number(consulta.servicioPrecio || consulta.SERVICIOPRECIO || 0) >= 0) {
             await connection.execute(
                 `
-        INSERT INTO DETALLE_FACTURA (
-          idDetalle,
-          idFactura,
-          descripcion,
-          tipoConcepto,
-          cantidad,
-          precioUnitario
-        ) VALUES (
-          :idDetalle,
-          :idFactura,
-          :descripcion,
-          'CONSULTA',
-          1,
-          :precioUnitario
-        )
-        `,
+                BEGIN
+                    PKG_FACTURACION.pr_insertar_detalle_factura(
+                        :p_idDetalle,
+                        :p_idFactura,
+                        :p_descripcion,
+                        :p_tipoConcepto,
+                        :p_cantidad,
+                        :p_precioUnitario,
+                        :p_idDetalle_out
+                    );
+                END;
+                `,
                 {
-                    idDetalle,
-                    idFactura,
-                    descripcion: `Consulta veterinaria - ${consulta.servicioNombre}`,
-                    precioUnitario: Number(consulta.servicioPrecio || 0),
+                    p_idDetalle: null,
+                    p_idFactura: idFactura,
+                    p_descripcion: `Consulta veterinaria - ${consulta.servicioNombre || consulta.SERVICIONOMBRE}`,
+                    p_tipoConcepto: "CONSULTA",
+                    p_cantidad: 1,
+                    p_precioUnitario: Number(consulta.servicioPrecio || consulta.SERVICIOPRECIO || 0),
+                    p_idDetalle_out: outString(30),
                 }
             );
         }
@@ -401,6 +378,8 @@ router.post("/", async (req, res) => {
         await connection.commit();
 
         res.status(201).json({
+            ok: true,
+            action: "CREATED",
             message: "Factura creada correctamente",
             id: idFactura,
             valorTotal,
@@ -413,10 +392,14 @@ router.post("/", async (req, res) => {
     }
 });
 
+/**
+ * PUT /api/facturas/:id
+ */
 router.put("/:id", async (req, res) => {
     let connection;
 
-    const id = req.params.id;
+    const id = normalizarId(req.params.id);
+
     const {
         idConsulta,
         fecha,
@@ -433,10 +416,7 @@ router.put("/:id", async (req, res) => {
     try {
         connection = await getConnection();
 
-        const consulta = await obtenerConsultaParaFactura(
-            connection,
-            idConsulta.trim()
-        );
+        const consulta = await obtenerConsultaParaFactura(connection, idConsulta);
 
         if (!consulta) {
             return res.status(404).json({
@@ -444,40 +424,45 @@ router.put("/:id", async (req, res) => {
             });
         }
 
+        const valorTotalActual = await recalcularTotalFactura(connection, id);
+
         const result = await connection.execute(
             `
-      UPDATE FACTURA
-      SET
-        idConsulta = :idConsulta,
-        idCliente = :idCliente,
-        fecha = TO_DATE(:fecha, 'YYYY-MM-DD'),
-        metodoPago = :metodoPago,
-        estadoPago = :estadoPago
-      WHERE idFactura = :id
-      `,
+            BEGIN
+                PKG_FACTURACION.pr_modificar_factura(
+                    :p_idFactura,
+                    :p_idConsulta,
+                    :p_idCliente,
+                    TO_DATE(:p_fecha, 'YYYY-MM-DD'),
+                    :p_valorTotal,
+                    :p_metodoPago,
+                    :p_estadoPago,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
             {
-                id,
-                idConsulta: consulta.idConsulta,
-                idCliente: consulta.idCliente,
-                fecha,
-                metodoPago: normalizarTexto(metodoPago),
-                estadoPago,
+                p_idFactura: id,
+                p_idConsulta: consulta.idConsulta || consulta.IDCONSULTA,
+                p_idCliente: consulta.idCliente || consulta.IDCLIENTE,
+                p_fecha: fecha,
+                p_valorTotal: valorTotalActual,
+                p_metodoPago: normalizarTexto(metodoPago),
+                p_estadoPago: estadoPago,
+                p_filas_afectadas: outNumber(),
             }
         );
-
-        if (result.rowsAffected === 0) {
-            await connection.rollback();
-            return res.status(404).json({
-                message: "Factura no encontrada",
-            });
-        }
 
         const valorTotal = await recalcularTotalFactura(connection, id);
 
         await connection.commit();
 
         res.json({
+            ok: true,
+            action: "UPDATED",
             message: "Factura actualizada correctamente",
+            id,
+            filasAfectadas: result.outBinds.p_filas_afectadas,
             valorTotal,
         });
     } catch (error) {
@@ -488,31 +473,39 @@ router.put("/:id", async (req, res) => {
     }
 });
 
+/**
+ * DELETE /api/facturas/:id
+ */
 router.delete("/:id", async (req, res) => {
     let connection;
 
-    const id = req.params.id;
+    const id = normalizarId(req.params.id);
 
     try {
         connection = await getConnection();
 
         const result = await connection.execute(
             `
-      DELETE FROM FACTURA
-      WHERE idFactura = :id
-      `,
-            { id },
+            BEGIN
+                PKG_FACTURACION.pr_eliminar_factura(
+                    :p_idFactura,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
+            {
+                p_idFactura: id,
+                p_filas_afectadas: outNumber(),
+            },
             { autoCommit: true }
         );
 
-        if (result.rowsAffected === 0) {
-            return res.status(404).json({
-                message: "Factura no encontrada",
-            });
-        }
-
         res.json({
+            ok: true,
+            action: "DELETED",
             message: "Factura eliminada correctamente",
+            id,
+            filasAfectadas: result.outBinds.p_filas_afectadas,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error eliminando factura");
@@ -521,32 +514,35 @@ router.delete("/:id", async (req, res) => {
     }
 });
 
+/**
+ * GET /api/facturas/:id/detalles
+ */
 router.get("/:id/detalles", async (req, res) => {
     let connection;
 
-    const idFactura = req.params.id;
+    const idFactura = normalizarId(req.params.id);
 
     try {
         connection = await getConnection();
 
         const result = await connection.execute(
             `
-      SELECT
-        TRIM(idDetalle) AS "id",
-        TRIM(idFactura) AS "idFactura",
-        descripcion AS "descripcion",
-        tipoConcepto AS "tipoConcepto",
-        cantidad AS "cantidad",
-        precioUnitario AS "precioUnitario",
-        cantidad * precioUnitario AS "subtotal"
-      FROM DETALLE_FACTURA
-      WHERE idFactura = :idFactura
-      ORDER BY tipoConcepto, descripcion
-      `,
-            { idFactura }
+            BEGIN
+                PKG_FACTURACION.pr_listar_detalles_factura(
+                    :p_idFactura,
+                    :p_cursor
+                );
+            END;
+            `,
+            {
+                p_idFactura: idFactura,
+                p_cursor: outCursor(),
+            }
         );
 
-        res.json(result.rows);
+        const rows = await cursorToRows(result.outBinds.p_cursor);
+
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando detalles de factura");
     } finally {
@@ -554,10 +550,14 @@ router.get("/:id/detalles", async (req, res) => {
     }
 });
 
+/**
+ * POST /api/facturas/:id/detalles
+ */
 router.post("/:id/detalles", async (req, res) => {
     let connection;
 
-    const idFactura = req.params.id;
+    const idFactura = normalizarId(req.params.id);
+
     const {
         id = null,
         descripcion,
@@ -580,33 +580,28 @@ router.post("/:id/detalles", async (req, res) => {
     try {
         connection = await getConnection();
 
-        const idDetalle = normalizarTexto(id) || (await generarIdDetalle(connection));
-
-        await connection.execute(
+        const result = await connection.execute(
             `
-      INSERT INTO DETALLE_FACTURA (
-        idDetalle,
-        idFactura,
-        descripcion,
-        tipoConcepto,
-        cantidad,
-        precioUnitario
-      ) VALUES (
-        :idDetalle,
-        :idFactura,
-        :descripcion,
-        :tipoConcepto,
-        :cantidad,
-        :precioUnitario
-      )
-      `,
+            BEGIN
+                PKG_FACTURACION.pr_insertar_detalle_factura(
+                    :p_idDetalle,
+                    :p_idFactura,
+                    :p_descripcion,
+                    :p_tipoConcepto,
+                    :p_cantidad,
+                    :p_precioUnitario,
+                    :p_idDetalle_out
+                );
+            END;
+            `,
             {
-                idDetalle,
-                idFactura: idFactura.trim(),
-                descripcion: descripcion.trim(),
-                tipoConcepto,
-                cantidad: Number(cantidad),
-                precioUnitario: Number(precioUnitario),
+                p_idDetalle: normalizarTexto(id),
+                p_idFactura: idFactura,
+                p_descripcion: descripcion.trim(),
+                p_tipoConcepto: tipoConcepto,
+                p_cantidad: Number(cantidad),
+                p_precioUnitario: Number(precioUnitario),
+                p_idDetalle_out: outString(30),
             }
         );
 
@@ -615,8 +610,10 @@ router.post("/:id/detalles", async (req, res) => {
         await connection.commit();
 
         res.status(201).json({
+            ok: true,
+            action: "CREATED",
             message: "Detalle agregado correctamente",
-            id: idDetalle,
+            id: result.outBinds.p_idDetalle_out,
             valorTotal,
         });
     } catch (error) {
@@ -627,11 +624,14 @@ router.post("/:id/detalles", async (req, res) => {
     }
 });
 
+/**
+ * PUT /api/facturas/:id/detalles/:idDetalle
+ */
 router.put("/:id/detalles/:idDetalle", async (req, res) => {
     let connection;
 
-    const idFactura = req.params.id;
-    const idDetalle = req.params.idDetalle;
+    const idFactura = normalizarId(req.params.id);
+    const idDetalle = normalizarId(req.params.idDetalle);
 
     const {
         descripcion,
@@ -656,38 +656,39 @@ router.put("/:id/detalles/:idDetalle", async (req, res) => {
 
         const result = await connection.execute(
             `
-      UPDATE DETALLE_FACTURA
-      SET
-        descripcion = :descripcion,
-        tipoConcepto = :tipoConcepto,
-        cantidad = :cantidad,
-        precioUnitario = :precioUnitario
-      WHERE idDetalle = :idDetalle
-        AND idFactura = :idFactura
-      `,
+            BEGIN
+                PKG_FACTURACION.pr_modificar_detalle_factura(
+                    :p_idDetalle,
+                    :p_idFactura,
+                    :p_descripcion,
+                    :p_tipoConcepto,
+                    :p_cantidad,
+                    :p_precioUnitario,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
             {
-                idDetalle,
-                idFactura,
-                descripcion: descripcion.trim(),
-                tipoConcepto,
-                cantidad: Number(cantidad),
-                precioUnitario: Number(precioUnitario),
+                p_idDetalle: idDetalle,
+                p_idFactura: idFactura,
+                p_descripcion: descripcion.trim(),
+                p_tipoConcepto: tipoConcepto,
+                p_cantidad: Number(cantidad),
+                p_precioUnitario: Number(precioUnitario),
+                p_filas_afectadas: outNumber(),
             }
         );
-
-        if (result.rowsAffected === 0) {
-            await connection.rollback();
-            return res.status(404).json({
-                message: "Detalle de factura no encontrado",
-            });
-        }
 
         const valorTotal = await recalcularTotalFactura(connection, idFactura);
 
         await connection.commit();
 
         res.json({
+            ok: true,
+            action: "UPDATED",
             message: "Detalle actualizado correctamente",
+            id: idDetalle,
+            filasAfectadas: result.outBinds.p_filas_afectadas,
             valorTotal,
         });
     } catch (error) {
@@ -698,40 +699,43 @@ router.put("/:id/detalles/:idDetalle", async (req, res) => {
     }
 });
 
+/**
+ * DELETE /api/facturas/:id/detalles/:idDetalle
+ */
 router.delete("/:id/detalles/:idDetalle", async (req, res) => {
     let connection;
 
-    const idFactura = req.params.id;
-    const idDetalle = req.params.idDetalle;
+    const idFactura = normalizarId(req.params.id);
+    const idDetalle = normalizarId(req.params.idDetalle);
 
     try {
         connection = await getConnection();
 
         const result = await connection.execute(
             `
-      DELETE FROM DETALLE_FACTURA
-      WHERE idDetalle = :idDetalle
-        AND idFactura = :idFactura
-      `,
+            BEGIN
+                PKG_FACTURACION.pr_eliminar_detalle_factura(
+                    :p_idDetalle,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
             {
-                idDetalle,
-                idFactura,
+                p_idDetalle: idDetalle,
+                p_filas_afectadas: outNumber(),
             }
         );
-
-        if (result.rowsAffected === 0) {
-            await connection.rollback();
-            return res.status(404).json({
-                message: "Detalle de factura no encontrado",
-            });
-        }
 
         const valorTotal = await recalcularTotalFactura(connection, idFactura);
 
         await connection.commit();
 
         res.json({
+            ok: true,
+            action: "DELETED",
             message: "Detalle eliminado correctamente",
+            id: idDetalle,
+            filasAfectadas: result.outBinds.p_filas_afectadas,
             valorTotal,
         });
     } catch (error) {
@@ -742,10 +746,13 @@ router.delete("/:id/detalles/:idDetalle", async (req, res) => {
     }
 });
 
+/**
+ * POST /api/facturas/:id/recalcular
+ */
 router.post("/:id/recalcular", async (req, res) => {
     let connection;
 
-    const idFactura = req.params.id;
+    const idFactura = normalizarId(req.params.id);
 
     try {
         connection = await getConnection();
@@ -755,7 +762,9 @@ router.post("/:id/recalcular", async (req, res) => {
         await connection.commit();
 
         res.json({
+            ok: true,
             message: "Total recalculado correctamente",
+            id: idFactura,
             valorTotal,
         });
     } catch (error) {

@@ -1,6 +1,12 @@
 const express = require("express");
 const router = express.Router();
+const oracledb = require("oracledb");
 const { getConnection } = require("../db");
+
+const {
+    cursorToRows,
+    outCursor,
+} = require("../plsql");
 
 function numeroEntero(valor, fallback) {
     const numero = Number(valor);
@@ -10,11 +16,11 @@ function numeroEntero(valor, fallback) {
 function obtenerFiltrosFecha(req) {
     const anioActual = new Date().getFullYear();
     const anio = numeroEntero(req.query.anio, anioActual);
-    const mes = numeroEntero(req.query.mes, 0);
+    const mes = numeroEntero(req.query.mes, new Date().getMonth() + 1);
 
     return {
         anio,
-        mes: mes >= 1 && mes <= 12 ? mes : 0,
+        mes: mes >= 1 && mes <= 12 ? mes : new Date().getMonth() + 1,
     };
 }
 
@@ -33,7 +39,8 @@ function manejarErrorOracle(error, res, mensajeBase) {
 }
 
 /**
- * GET /api/reportes/ingresos-mensuales?anio=&mes=
+ * Usa PKG_REPORTES.fn_ingresos_mensuales.
+ * Devuelve total pagado del año/mes.
  */
 router.get("/ingresos-mensuales", async (req, res) => {
     let connection;
@@ -44,28 +51,28 @@ router.get("/ingresos-mensuales", async (req, res) => {
 
         const result = await connection.execute(
             `
-      SELECT
-        EXTRACT(MONTH FROM f.fecha) AS "mesNumero",
-        INITCAP(TRIM(TO_CHAR(f.fecha, 'FMMonth', 'NLS_DATE_LANGUAGE=SPANISH'))) AS "mes",
-        COUNT(*) AS "totalFacturas",
-        SUM(CASE WHEN f.estadoPago = 'PAGADA' THEN 1 ELSE 0 END) AS "facturasPagadas",
-        SUM(CASE WHEN f.estadoPago = 'PENDIENTE' THEN 1 ELSE 0 END) AS "facturasPendientes",
-        SUM(CASE WHEN f.estadoPago = 'ANULADA' THEN 1 ELSE 0 END) AS "facturasAnuladas",
-        NVL(SUM(CASE WHEN f.estadoPago = 'PAGADA' THEN f.valorTotal ELSE 0 END), 0) AS "ingresosPagados",
-        NVL(SUM(CASE WHEN f.estadoPago = 'PENDIENTE' THEN f.valorTotal ELSE 0 END), 0) AS "ingresosPendientes",
-        NVL(SUM(f.valorTotal), 0) AS "valorTotal"
-      FROM FACTURA f
-      WHERE EXTRACT(YEAR FROM f.fecha) = :anio
-        AND (:mes = 0 OR EXTRACT(MONTH FROM f.fecha) = :mes)
-      GROUP BY
-        EXTRACT(MONTH FROM f.fecha),
-        INITCAP(TRIM(TO_CHAR(f.fecha, 'FMMonth', 'NLS_DATE_LANGUAGE=SPANISH')))
-      ORDER BY EXTRACT(MONTH FROM f.fecha)
-      `,
-            { anio, mes }
+            BEGIN
+                :total := PKG_REPORTES.fn_ingresos_mensuales(
+                    :p_anio,
+                    :p_mes
+                );
+            END;
+            `,
+            {
+                p_anio: anio,
+                p_mes: mes,
+                total: {
+                    dir: oracledb.BIND_OUT,
+                    type: oracledb.NUMBER,
+                },
+            }
         );
 
-        res.json(result.rows);
+        res.json({
+            anio,
+            mes,
+            ingresosPagados: result.outBinds.total || 0,
+        });
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando ingresos mensuales");
     } finally {
@@ -74,7 +81,8 @@ router.get("/ingresos-mensuales", async (req, res) => {
 });
 
 /**
- * GET /api/reportes/mascotas-mas-atendidas?top=5
+ * Usa PKG_REPORTES.fn_mascotas_mas_atendidas.
+ * Esta función sí retorna SYS_REFCURSOR.
  */
 router.get("/mascotas-mas-atendidas", async (req, res) => {
     let connection;
@@ -83,37 +91,21 @@ router.get("/mascotas-mas-atendidas", async (req, res) => {
     try {
         connection = await getConnection();
 
-        const result = await connection.execute(`
-      SELECT *
-      FROM (
-        SELECT
-          TRIM(ma.codigoMascota) AS "mascotaId",
-          ma.nombre AS "mascotaNombre",
-          ma.especie AS "mascotaEspecie",
-          ma.raza AS "mascotaRaza",
-          TRIM(cl.idCliente) AS "clienteId",
-          cl.nombreCompleto AS "clienteNombre",
-          COUNT(cv.idConsulta) AS "atenciones",
-          MAX(TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD')) AS "ultimaAtencion",
-          NVL(SUM(CASE WHEN f.estadoPago = 'PAGADA' THEN f.valorTotal ELSE 0 END), 0) AS "ingresosGenerados"
-        FROM CONSULTA_VETERINARIA cv
-        JOIN CITA ci ON ci.idCita = cv.idCita
-        JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
-        JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
-        LEFT JOIN FACTURA f ON f.idConsulta = cv.idConsulta
-        GROUP BY
-          TRIM(ma.codigoMascota),
-          ma.nombre,
-          ma.especie,
-          ma.raza,
-          TRIM(cl.idCliente),
-          cl.nombreCompleto
-        ORDER BY COUNT(cv.idConsulta) DESC, ma.nombre
-      )
-      FETCH FIRST ${top} ROWS ONLY
-    `);
+        const result = await connection.execute(
+            `
+            BEGIN
+                :cursor := PKG_REPORTES.fn_mascotas_mas_atendidas(:p_top);
+            END;
+            `,
+            {
+                p_top: top,
+                cursor: outCursor(),
+            }
+        );
 
-        res.json(result.rows);
+        const rows = await cursorToRows(result.outBinds.cursor);
+
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando mascotas más atendidas");
     } finally {
@@ -122,7 +114,8 @@ router.get("/mascotas-mas-atendidas", async (req, res) => {
 });
 
 /**
- * GET /api/reportes/vacunas-aplicadas?anio=&mes=
+ * Usa PKG_REPORTES.fn_vacunas_aplicadas_mes.
+ * Devuelve total de vacunas aplicadas en año/mes.
  */
 router.get("/vacunas-aplicadas", async (req, res) => {
     let connection;
@@ -133,31 +126,28 @@ router.get("/vacunas-aplicadas", async (req, res) => {
 
         const result = await connection.execute(
             `
-      SELECT
-        TRIM(v.idVacuna) AS "vacunaId",
-        v.nombre AS "vacunaNombre",
-        v.laboratorio AS "laboratorio",
-        v.especieObjetivo AS "especieObjetivo",
-        COUNT(*) AS "aplicaciones",
-        COUNT(DISTINCT av.codigoMascota) AS "mascotasVacunadas",
-        NVL(SUM(v.precio), 0) AS "valorEstimado",
-        MIN(TO_CHAR(av.fechaAplicacion, 'YYYY-MM-DD')) AS "primeraAplicacion",
-        MAX(TO_CHAR(av.fechaAplicacion, 'YYYY-MM-DD')) AS "ultimaAplicacion"
-      FROM APLICACION_VACUNA av
-      JOIN VACUNA v ON v.idVacuna = av.idVacuna
-      WHERE EXTRACT(YEAR FROM av.fechaAplicacion) = :anio
-        AND (:mes = 0 OR EXTRACT(MONTH FROM av.fechaAplicacion) = :mes)
-      GROUP BY
-        TRIM(v.idVacuna),
-        v.nombre,
-        v.laboratorio,
-        v.especieObjetivo
-      ORDER BY COUNT(*) DESC, v.nombre
-      `,
-            { anio, mes }
+            BEGIN
+                :total := PKG_REPORTES.fn_vacunas_aplicadas_mes(
+                    :p_anio,
+                    :p_mes
+                );
+            END;
+            `,
+            {
+                p_anio: anio,
+                p_mes: mes,
+                total: {
+                    dir: oracledb.BIND_OUT,
+                    type: oracledb.NUMBER,
+                },
+            }
         );
 
-        res.json(result.rows);
+        res.json({
+            anio,
+            mes,
+            aplicaciones: result.outBinds.total || 0,
+        });
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando vacunas aplicadas");
     } finally {
@@ -166,7 +156,8 @@ router.get("/vacunas-aplicadas", async (req, res) => {
 });
 
 /**
- * GET /api/reportes/tratamientos-activos
+ * Usa PKG_REPORTES.fn_tratamientos_activos.
+ * Devuelve número total de tratamientos activos.
  */
 router.get("/tratamientos-activos", async (req, res) => {
     let connection;
@@ -174,51 +165,23 @@ router.get("/tratamientos-activos", async (req, res) => {
     try {
         connection = await getConnection();
 
-        const result = await connection.execute(`
-      SELECT
-        TRIM(t.idTratamiento) AS "id",
-        TRIM(t.idDiagnostico) AS "idDiagnostico",
-        t.tipo AS "tipo",
-        TO_CHAR(t.fechaInicio, 'YYYY-MM-DD') AS "fechaInicio",
-        TO_CHAR(t.fechaFinEstimada, 'YYYY-MM-DD') AS "fechaFinEstimada",
-        t.indicaciones AS "indicaciones",
-        t.estado AS "estado",
+        const result = await connection.execute(
+            `
+            BEGIN
+                :total := PKG_REPORTES.fn_tratamientos_activos;
+            END;
+            `,
+            {
+                total: {
+                    dir: oracledb.BIND_OUT,
+                    type: oracledb.NUMBER,
+                },
+            }
+        );
 
-        d.descripcionCondicion AS "descripcionCondicion",
-        d.nivelGravedad AS "nivelGravedad",
-        d.tipoAfeccion AS "tipoAfeccion",
-
-        TRIM(ma.codigoMascota) AS "mascotaId",
-        ma.nombre AS "mascotaNombre",
-        ma.especie AS "mascotaEspecie",
-
-        TRIM(cl.idCliente) AS "clienteId",
-        cl.nombreCompleto AS "clienteNombre",
-        cl.telefono AS "clienteTelefono",
-
-        TRIM(ev.idEmpleado) AS "veterinarioId",
-        ev.nombreCompleto AS "veterinarioNombre",
-
-        cs.nombre AS "servicioNombre",
-
-        (
-          SELECT COUNT(*)
-          FROM TRATAMIENTO_MEDICAMENTO tm
-          WHERE tm.idTratamiento = t.idTratamiento
-        ) AS "medicamentosCount"
-      FROM TRATAMIENTO t
-      JOIN DIAGNOSTICO d ON d.idDiagnostico = t.idDiagnostico
-      JOIN CONSULTA_VETERINARIA cv ON cv.idConsulta = d.idConsulta
-      JOIN CITA ci ON ci.idCita = cv.idCita
-      JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
-      JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
-      JOIN EMPLEADO ev ON ev.idEmpleado = t.idVeterinario
-      LEFT JOIN CATALOGO_SERVICIOS cs ON cs.idServicio = t.idServicio
-      WHERE t.estado = 'ACTIVO'
-      ORDER BY t.fechaInicio DESC, t.idTratamiento DESC
-    `);
-
-        res.json(result.rows);
+        res.json({
+            tratamientosActivos: result.outBinds.total || 0,
+        });
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando tratamientos activos");
     } finally {
@@ -227,40 +190,32 @@ router.get("/tratamientos-activos", async (req, res) => {
 });
 
 /**
- * GET /api/reportes/top-servicios?top=5
+ * No existe como función directa en PKG_REPORTES.
+ * Pero sí existe en PKG_FACTURACION.fn_top_servicios_facturados.
  */
 router.get("/top-servicios", async (req, res) => {
     let connection;
-    const top = obtenerTop(req, 5, 20);
+    const top = obtenerTop(req, 5, 5);
 
     try {
         connection = await getConnection();
 
-        const result = await connection.execute(`
-      SELECT *
-      FROM (
-        SELECT
-          TRIM(cs.idServicio) AS "servicioId",
-          cs.nombre AS "servicioNombre",
-          cs.tipoServicio AS "tipoServicio",
-          cs.precio AS "precio",
-          COUNT(cv.idConsulta) AS "vecesUsado",
-          NVL(SUM(CASE WHEN f.estadoPago = 'PAGADA' THEN f.valorTotal ELSE 0 END), 0) AS "ingresosPagados",
-          MAX(TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD')) AS "ultimaAtencion"
-        FROM CATALOGO_SERVICIOS cs
-        JOIN CONSULTA_VETERINARIA cv ON cv.idServicio = cs.idServicio
-        LEFT JOIN FACTURA f ON f.idConsulta = cv.idConsulta
-        GROUP BY
-          TRIM(cs.idServicio),
-          cs.nombre,
-          cs.tipoServicio,
-          cs.precio
-        ORDER BY COUNT(cv.idConsulta) DESC, NVL(SUM(CASE WHEN f.estadoPago = 'PAGADA' THEN f.valorTotal ELSE 0 END), 0) DESC
-      )
-      FETCH FIRST ${top} ROWS ONLY
-    `);
+        const result = await connection.execute(
+            `
+            BEGIN
+                :topServicios := PKG_FACTURACION.fn_top_servicios_facturados(:p_top);
+            END;
+            `,
+            {
+                p_top: top,
+                topServicios: {
+                    dir: oracledb.BIND_OUT,
+                    type: "T_VARRAY_TOP_SERVICIOS",
+                },
+            }
+        );
 
-        res.json(result.rows);
+        res.json(result.outBinds.topServicios || []);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando top de servicios");
     } finally {
@@ -269,7 +224,8 @@ router.get("/top-servicios", async (req, res) => {
 });
 
 /**
- * GET /api/reportes/resumen-clientes
+ * No existe en PKG_REPORTES.
+ * Pero sí existe como función en PKG_FACTURACION.fn_resumen_financiero_clientes.
  */
 router.get("/resumen-clientes", async (req, res) => {
     let connection;
@@ -277,36 +233,61 @@ router.get("/resumen-clientes", async (req, res) => {
     try {
         connection = await getConnection();
 
-        const result = await connection.execute(`
-      SELECT
-        TRIM(cl.idCliente) AS "clienteId",
-        cl.nombreCompleto AS "clienteNombre",
-        cl.telefono AS "telefono",
-        cl.correoElectronico AS "email",
-        cl.estado AS "estado",
-        COUNT(DISTINCT ma.codigoMascota) AS "totalMascotas",
-        COUNT(f.idFactura) AS "totalFacturas",
-        SUM(CASE WHEN f.estadoPago = 'PAGADA' THEN 1 ELSE 0 END) AS "facturasPagadas",
-        SUM(CASE WHEN f.estadoPago = 'PENDIENTE' THEN 1 ELSE 0 END) AS "facturasPendientes",
-        SUM(CASE WHEN f.estadoPago = 'ANULADA' THEN 1 ELSE 0 END) AS "facturasAnuladas",
-        NVL(SUM(CASE WHEN f.estadoPago = 'PAGADA' THEN f.valorTotal ELSE 0 END), 0) AS "ingresoTotal",
-        NVL(SUM(CASE WHEN f.estadoPago = 'PENDIENTE' THEN f.valorTotal ELSE 0 END), 0) AS "ingresoPendiente",
-        MAX(TO_CHAR(f.fecha, 'YYYY-MM-DD')) AS "ultimaFactura"
-      FROM CLIENTE cl
-      LEFT JOIN MASCOTA ma ON ma.idCliente = cl.idCliente
-      LEFT JOIN FACTURA f ON f.idCliente = cl.idCliente
-      GROUP BY
-        TRIM(cl.idCliente),
-        cl.nombreCompleto,
-        cl.telefono,
-        cl.correoElectronico,
-        cl.estado
-      ORDER BY "ingresoTotal" DESC, cl.nombreCompleto
-    `);
+        const result = await connection.execute(
+            `
+            BEGIN
+                :resumen := PKG_FACTURACION.fn_resumen_financiero_clientes;
+            END;
+            `,
+            {
+                resumen: {
+                    dir: oracledb.BIND_OUT,
+                    type: "T_TAB_RESUMEN_CLIENTE",
+                },
+            }
+        );
 
-        res.json(result.rows);
+        res.json(result.outBinds.resumen || []);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando resumen de clientes");
+    } finally {
+        if (connection) await connection.close();
+    }
+});
+
+/**
+ * Usa PKG_REPORTES.fn_historial_mascota.
+ * Endpoint extra útil:
+ * GET /api/reportes/historial-mascota/:codigoMascota
+ */
+router.get("/historial-mascota/:codigoMascota", async (req, res) => {
+    let connection;
+
+    const codigoMascota = String(req.params.codigoMascota || "")
+        .trim()
+        .toUpperCase();
+
+    try {
+        connection = await getConnection();
+
+        const result = await connection.execute(
+            `
+            BEGIN
+                :historial := PKG_REPORTES.fn_historial_mascota(:p_codigoMascota);
+            END;
+            `,
+            {
+                p_codigoMascota: codigoMascota,
+                historial: {
+                    dir: oracledb.BIND_OUT,
+                    type: "T_TAB_HISTORIAL",
+                },
+            }
+        );
+
+        res.json(result.outBinds.historial || []);
+    } catch (error) {
+        manejarErrorOracle(error, res, "Error consultando historial de mascota");
     } finally {
         if (connection) await connection.close();
     }
