@@ -857,6 +857,20 @@ END PKG_MASCOTAS;
 -- 4. PKG_AGENDAMIENTO
 -- ============================================================
 CREATE OR REPLACE PACKAGE PKG_AGENDAMIENTO AS
+    PROCEDURE pr_listar_citas(
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_obtener_cita(
+        p_idCita IN CITA.idCita%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_catalogos_citas(
+        p_mascotas OUT SYS_REFCURSOR,
+        p_veterinarios OUT SYS_REFCURSOR,
+        p_recepcionistas OUT SYS_REFCURSOR
+    );
     PROCEDURE pr_insertar_cita(
         p_idCita IN CITA.idCita%TYPE,
         p_codigoMascota IN CITA.codigoMascota%TYPE,
@@ -885,6 +899,141 @@ END PKG_AGENDAMIENTO;
 /
 
 CREATE OR REPLACE PACKAGE BODY PKG_AGENDAMIENTO AS
+    PROCEDURE pr_listar_citas(
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(ci.idCita) AS "id",
+                TRIM(ci.codigoMascota) AS "mascotaId",
+                ma.nombre AS "mascotaNombre",
+                ma.especie AS "mascotaEspecie",
+                TRIM(cl.idCliente) AS "clienteId",
+                cl.nombreCompleto AS "clienteNombre",
+                cl.telefono AS "clienteTelefono",
+                TRIM(ci.idVeterinario) AS "veterinarioId",
+                ev.nombreCompleto AS "veterinarioNombre",
+                TRIM(ci.idRecepcionista) AS "recepcionistaId",
+                er.nombreCompleto AS "recepcionistaNombre",
+                TO_CHAR(ci.fecha, 'YYYY-MM-DD') AS "fecha",
+                TO_CHAR(EXTRACT(HOUR FROM ci.hora), 'FM00') || ':' ||
+                TO_CHAR(EXTRACT(MINUTE FROM ci.hora), 'FM00') AS "hora",
+                ci.motivoConsulta AS "motivo",
+                ci.estadoCita AS "estado"
+            FROM CITA ci
+            JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
+            JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
+            JOIN EMPLEADO ev ON ev.idEmpleado = ci.idVeterinario
+            JOIN EMPLEADO er ON er.idEmpleado = ci.idRecepcionista
+            ORDER BY ci.fecha DESC, ci.hora DESC;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'CITA',
+                'LISTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_citas;
+
+
+    PROCEDURE pr_obtener_cita(
+        p_idCita IN CITA.idCita%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(ci.idCita) AS "id",
+                TRIM(ci.codigoMascota) AS "mascotaId",
+                ma.nombre AS "mascotaNombre",
+                ma.especie AS "mascotaEspecie",
+                TRIM(cl.idCliente) AS "clienteId",
+                cl.nombreCompleto AS "clienteNombre",
+                cl.telefono AS "clienteTelefono",
+                TRIM(ci.idVeterinario) AS "veterinarioId",
+                ev.nombreCompleto AS "veterinarioNombre",
+                TRIM(ci.idRecepcionista) AS "recepcionistaId",
+                er.nombreCompleto AS "recepcionistaNombre",
+                TO_CHAR(ci.fecha, 'YYYY-MM-DD') AS "fecha",
+                TO_CHAR(EXTRACT(HOUR FROM ci.hora), 'FM00') || ':' ||
+                TO_CHAR(EXTRACT(MINUTE FROM ci.hora), 'FM00') AS "hora",
+                ci.motivoConsulta AS "motivo",
+                ci.estadoCita AS "estado"
+            FROM CITA ci
+            JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
+            JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
+            JOIN EMPLEADO ev ON ev.idEmpleado = ci.idVeterinario
+            JOIN EMPLEADO er ON er.idEmpleado = ci.idRecepcionista
+            WHERE TRIM(UPPER(ci.idCita)) = TRIM(UPPER(p_idCita));
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'CITA',
+                'OBTENER',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_obtener_cita;
+
+
+    PROCEDURE pr_catalogos_citas(
+        p_mascotas OUT SYS_REFCURSOR,
+        p_veterinarios OUT SYS_REFCURSOR,
+        p_recepcionistas OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_mascotas FOR
+            SELECT
+                TRIM(m.codigoMascota) AS "id",
+                m.nombre AS "nombre",
+                m.especie AS "especie",
+                c.nombreCompleto AS "clienteNombre"
+            FROM MASCOTA m
+            JOIN CLIENTE c ON c.idCliente = m.idCliente
+            ORDER BY m.nombre;
+
+        OPEN p_veterinarios FOR
+            SELECT
+                TRIM(v.idEmpleado) AS "id",
+                e.nombreCompleto AS "nombre",
+                v.especialidad AS "especialidad"
+            FROM VETERINARIO v
+            JOIN EMPLEADO e ON e.idEmpleado = v.idEmpleado
+            WHERE e.estadoLaboral = 'ACTIVO'
+            ORDER BY e.nombreCompleto;
+
+        OPEN p_recepcionistas FOR
+            SELECT
+                TRIM(r.idEmpleado) AS "id",
+                e.nombreCompleto AS "nombre",
+                r.turno AS "turno"
+            FROM RECEPCIONISTA r
+            JOIN EMPLEADO e ON e.idEmpleado = r.idEmpleado
+            WHERE e.estadoLaboral = 'ACTIVO'
+            ORDER BY e.nombreCompleto;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'CITA',
+                'CATALOGOS',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_catalogos_citas;
     PROCEDURE pr_insertar_cita(p_idCita IN CITA.idCita%TYPE, p_codigoMascota IN CITA.codigoMascota%TYPE,
         p_idVeterinario IN CITA.idVeterinario%TYPE, p_idRecepcionista IN CITA.idRecepcionista%TYPE,
         p_fecha IN CITA.fecha%TYPE, p_hora IN CITA.hora%TYPE, p_motivoConsulta IN CITA.motivoConsulta%TYPE,
@@ -955,6 +1104,19 @@ END PKG_AGENDAMIENTO;
 -- 5. PKG_CONSULTAS_MEDICAS
 -- ============================================================
 CREATE OR REPLACE PACKAGE PKG_CONSULTAS_MEDICAS AS
+    PROCEDURE pr_listar_consultas(
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_obtener_consulta(
+        p_idConsulta IN CONSULTA_VETERINARIA.idConsulta%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_catalogos_consultas(
+        p_citas OUT SYS_REFCURSOR,
+        p_servicios OUT SYS_REFCURSOR
+    );
     PROCEDURE pr_insertar_consulta(p_idConsulta IN CONSULTA_VETERINARIA.idConsulta%TYPE, p_idCita IN CONSULTA_VETERINARIA.idCita%TYPE,
         p_idServicio IN CONSULTA_VETERINARIA.idServicio%TYPE, p_temperatura IN CONSULTA_VETERINARIA.temperatura%TYPE,
         p_pesoConsulta IN CONSULTA_VETERINARIA.pesoConsulta%TYPE, p_observaciones IN CONSULTA_VETERINARIA.observaciones%TYPE,
@@ -1001,6 +1163,178 @@ END PKG_CONSULTAS_MEDICAS;
 /
 
 CREATE OR REPLACE PACKAGE BODY PKG_CONSULTAS_MEDICAS AS
+    PROCEDURE pr_listar_consultas(
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(cv.idConsulta) AS "id",
+                TRIM(cv.idCita) AS "idCita",
+                TRIM(cv.idServicio) AS "idServicio",
+                cv.temperatura AS "temperatura",
+                cv.pesoConsulta AS "pesoConsulta",
+                cv.observaciones AS "observaciones",
+                cv.recomendaciones AS "recomendaciones",
+                TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
+
+                TO_CHAR(ci.fecha, 'YYYY-MM-DD') AS "citaFecha",
+                TO_CHAR(EXTRACT(HOUR FROM ci.hora), 'FM00') || ':' ||
+                TO_CHAR(EXTRACT(MINUTE FROM ci.hora), 'FM00') AS "citaHora",
+                ci.motivoConsulta AS "motivo",
+                ci.estadoCita AS "citaEstado",
+
+                TRIM(ma.codigoMascota) AS "mascotaId",
+                ma.nombre AS "mascotaNombre",
+                ma.especie AS "mascotaEspecie",
+
+                TRIM(cl.idCliente) AS "clienteId",
+                cl.nombreCompleto AS "clienteNombre",
+                cl.telefono AS "clienteTelefono",
+
+                TRIM(ev.idEmpleado) AS "veterinarioId",
+                ev.nombreCompleto AS "veterinarioNombre",
+
+                cs.nombre AS "servicioNombre",
+                cs.tipoServicio AS "servicioTipo",
+                cs.precio AS "servicioPrecio"
+            FROM CONSULTA_VETERINARIA cv
+            JOIN CITA ci ON ci.idCita = cv.idCita
+            JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
+            JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
+            JOIN EMPLEADO ev ON ev.idEmpleado = ci.idVeterinario
+            JOIN CATALOGO_SERVICIOS cs ON cs.idServicio = cv.idServicio
+            ORDER BY cv.fechaAtencionReal DESC, ci.fecha DESC, ci.hora DESC;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'CONSULTA_VETERINARIA',
+                'LISTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_consultas;
+
+
+    PROCEDURE pr_obtener_consulta(
+        p_idConsulta IN CONSULTA_VETERINARIA.idConsulta%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(cv.idConsulta) AS "id",
+                TRIM(cv.idCita) AS "idCita",
+                TRIM(cv.idServicio) AS "idServicio",
+                cv.temperatura AS "temperatura",
+                cv.pesoConsulta AS "pesoConsulta",
+                cv.observaciones AS "observaciones",
+                cv.recomendaciones AS "recomendaciones",
+                TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
+
+                TO_CHAR(ci.fecha, 'YYYY-MM-DD') AS "citaFecha",
+                TO_CHAR(EXTRACT(HOUR FROM ci.hora), 'FM00') || ':' ||
+                TO_CHAR(EXTRACT(MINUTE FROM ci.hora), 'FM00') AS "citaHora",
+                ci.motivoConsulta AS "motivo",
+                ci.estadoCita AS "citaEstado",
+
+                TRIM(ma.codigoMascota) AS "mascotaId",
+                ma.nombre AS "mascotaNombre",
+                ma.especie AS "mascotaEspecie",
+
+                TRIM(cl.idCliente) AS "clienteId",
+                cl.nombreCompleto AS "clienteNombre",
+                cl.telefono AS "clienteTelefono",
+
+                TRIM(ev.idEmpleado) AS "veterinarioId",
+                ev.nombreCompleto AS "veterinarioNombre",
+
+                cs.nombre AS "servicioNombre",
+                cs.tipoServicio AS "servicioTipo",
+                cs.precio AS "servicioPrecio"
+            FROM CONSULTA_VETERINARIA cv
+            JOIN CITA ci ON ci.idCita = cv.idCita
+            JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
+            JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
+            JOIN EMPLEADO ev ON ev.idEmpleado = ci.idVeterinario
+            JOIN CATALOGO_SERVICIOS cs ON cs.idServicio = cv.idServicio
+            WHERE TRIM(UPPER(cv.idConsulta)) = TRIM(UPPER(p_idConsulta));
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'CONSULTA_VETERINARIA',
+                'OBTENER',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_obtener_consulta;
+
+
+    PROCEDURE pr_catalogos_consultas(
+        p_citas OUT SYS_REFCURSOR,
+        p_servicios OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_citas FOR
+            SELECT
+                TRIM(ci.idCita) AS "id",
+                TO_CHAR(ci.fecha, 'YYYY-MM-DD') AS "fecha",
+                TO_CHAR(EXTRACT(HOUR FROM ci.hora), 'FM00') || ':' ||
+                TO_CHAR(EXTRACT(MINUTE FROM ci.hora), 'FM00') AS "hora",
+                ci.motivoConsulta AS "motivo",
+                ci.estadoCita AS "estado",
+                TRIM(ma.codigoMascota) AS "mascotaId",
+                ma.nombre AS "mascotaNombre",
+                ma.especie AS "mascotaEspecie",
+                TRIM(cl.idCliente) AS "clienteId",
+                cl.nombreCompleto AS "clienteNombre",
+                cl.telefono AS "clienteTelefono",
+                TRIM(ev.idEmpleado) AS "veterinarioId",
+                ev.nombreCompleto AS "veterinarioNombre"
+            FROM CITA ci
+            JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
+            JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
+            JOIN EMPLEADO ev ON ev.idEmpleado = ci.idVeterinario
+            WHERE ci.estadoCita IN ('PROGRAMADA', 'CONFIRMADA', 'ATENDIDA')
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM CONSULTA_VETERINARIA cv
+                  WHERE cv.idCita = ci.idCita
+              )
+            ORDER BY ci.fecha DESC, ci.hora DESC;
+
+        OPEN p_servicios FOR
+            SELECT
+                TRIM(idServicio) AS "id",
+                nombre AS "nombre",
+                tipoServicio AS "tipoServicio",
+                precio AS "precio",
+                descripcion AS "descripcion",
+                activo AS "activo"
+            FROM CATALOGO_SERVICIOS
+            WHERE activo = 'S'
+            ORDER BY nombre;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'CONSULTA_VETERINARIA',
+                'CATALOGOS',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_catalogos_consultas;
     PROCEDURE pr_insertar_consulta(p_idConsulta IN CONSULTA_VETERINARIA.idConsulta%TYPE, p_idCita IN CONSULTA_VETERINARIA.idCita%TYPE,
         p_idServicio IN CONSULTA_VETERINARIA.idServicio%TYPE, p_temperatura IN CONSULTA_VETERINARIA.temperatura%TYPE,
         p_pesoConsulta IN CONSULTA_VETERINARIA.pesoConsulta%TYPE, p_observaciones IN CONSULTA_VETERINARIA.observaciones%TYPE,
@@ -1120,6 +1454,14 @@ CREATE OR REPLACE PACKAGE PKG_INVENTARIO_MEDICO AS
         p_descripcion IN MEDICAMENTO.descripcion%TYPE, p_precioUnitario IN MEDICAMENTO.precioUnitario%TYPE, p_filas_afectadas OUT NUMBER);
     PROCEDURE pr_eliminar_medicamento(p_idMedicamento IN MEDICAMENTO.idMedicamento%TYPE, p_filas_afectadas OUT NUMBER);
 
+    PROCEDURE pr_listar_vacunas(
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_obtener_vacuna(
+        p_idVacuna IN VACUNA.idVacuna%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    );
     PROCEDURE pr_insertar_vacuna(p_idVacuna IN VACUNA.idVacuna%TYPE, p_nombre IN VACUNA.nombre%TYPE,
         p_laboratorio IN VACUNA.laboratorio%TYPE, p_lote IN VACUNA.lote%TYPE, p_fechaVencimiento IN VACUNA.fechaVencimiento%TYPE,
         p_especieObjetivo IN VACUNA.especieObjetivo%TYPE, p_precio IN VACUNA.precio%TYPE, p_idVacuna_out OUT VACUNA.idVacuna%TYPE);
@@ -1197,6 +1539,65 @@ CREATE OR REPLACE PACKAGE BODY PKG_INVENTARIO_MEDICO AS
     BEGIN DELETE FROM MEDICAMENTO WHERE idMedicamento=p_idMedicamento; p_filas_afectadas:=SQL%ROWCOUNT; IF p_filas_afectadas=0 THEN PKG_UTILIDADES.lanzar_no_encontrado('MEDICAMENTO',p_idMedicamento); END IF;
     EXCEPTION WHEN OTHERS THEN IF SQLCODE BETWEEN -20999 AND -20000 THEN RAISE; END IF; PKG_UTILIDADES.manejar('MEDICAMENTO','ELIMINAR',SQLCODE,SQLERRM); END;
 
+    PROCEDURE pr_listar_vacunas(
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(idVacuna) AS id,
+                nombre,
+                laboratorio,
+                lote,
+                TO_CHAR(fechaVencimiento, 'YYYY-MM-DD') AS fechaVencimiento,
+                especieObjetivo,
+                precio
+            FROM VACUNA
+            ORDER BY nombre;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'VACUNA',
+                'LISTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_vacunas;
+
+
+    PROCEDURE pr_obtener_vacuna(
+        p_idVacuna IN VACUNA.idVacuna%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(idVacuna) AS id,
+                nombre,
+                laboratorio,
+                lote,
+                TO_CHAR(fechaVencimiento, 'YYYY-MM-DD') AS fechaVencimiento,
+                especieObjetivo,
+                precio
+            FROM VACUNA
+            WHERE TRIM(UPPER(idVacuna)) = TRIM(UPPER(p_idVacuna));
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'VACUNA',
+                'OBTENER',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_obtener_vacuna;
     PROCEDURE pr_insertar_vacuna(p_idVacuna IN VACUNA.idVacuna%TYPE, p_nombre IN VACUNA.nombre%TYPE,
         p_laboratorio IN VACUNA.laboratorio%TYPE, p_lote IN VACUNA.lote%TYPE, p_fechaVencimiento IN VACUNA.fechaVencimiento%TYPE,
         p_especieObjetivo IN VACUNA.especieObjetivo%TYPE, p_precio IN VACUNA.precio%TYPE, p_idVacuna_out OUT VACUNA.idVacuna%TYPE) IS
@@ -1217,6 +1618,14 @@ END PKG_INVENTARIO_MEDICO;
 -- 7. PKG_VACUNACION
 -- ============================================================
 CREATE OR REPLACE PACKAGE PKG_VACUNACION AS
+    PROCEDURE pr_listar_aplicaciones_vacuna(
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_catalogos_vacunacion(
+        p_mascotas OUT SYS_REFCURSOR,
+        p_vacunas OUT SYS_REFCURSOR
+    );
     PROCEDURE pr_insertar_aplicacion_vacuna(p_codigoMascota IN APLICACION_VACUNA.codigoMascota%TYPE,
         p_idVacuna IN APLICACION_VACUNA.idVacuna%TYPE, p_fechaAplicacion IN APLICACION_VACUNA.fechaAplicacion%TYPE,
         p_observacion IN APLICACION_VACUNA.observacion%TYPE);
@@ -1235,6 +1644,88 @@ END PKG_VACUNACION;
 /
 
 CREATE OR REPLACE PACKAGE BODY PKG_VACUNACION AS
+    PROCEDURE pr_listar_aplicaciones_vacuna(
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(av.codigoMascota) AS codigoMascota,
+                TRIM(av.idVacuna) AS idVacuna,
+                TO_CHAR(av.fechaAplicacion, 'YYYY-MM-DD') AS fechaAplicacion,
+                av.observacion AS observacion,
+
+                ma.nombre AS mascotaNombre,
+                ma.especie AS mascotaEspecie,
+                TRIM(cl.idCliente) AS clienteId,
+                cl.nombreCompleto AS clienteNombre,
+
+                v.nombre AS vacunaNombre,
+                v.laboratorio AS laboratorio,
+                v.lote AS lote,
+                v.especieObjetivo AS especieObjetivo,
+                v.precio AS precio
+            FROM APLICACION_VACUNA av
+            JOIN MASCOTA ma ON ma.codigoMascota = av.codigoMascota
+            JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
+            JOIN VACUNA v ON v.idVacuna = av.idVacuna
+            ORDER BY av.fechaAplicacion DESC, ma.nombre, v.nombre;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'APLICACION_VACUNA',
+                'LISTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_aplicaciones_vacuna;
+
+
+    PROCEDURE pr_catalogos_vacunacion(
+        p_mascotas OUT SYS_REFCURSOR,
+        p_vacunas OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_mascotas FOR
+            SELECT
+                TRIM(m.codigoMascota) AS id,
+                m.nombre AS nombre,
+                m.especie AS especie,
+                m.raza AS raza,
+                TRIM(c.idCliente) AS clienteId,
+                c.nombreCompleto AS clienteNombre
+            FROM MASCOTA m
+            JOIN CLIENTE c ON c.idCliente = m.idCliente
+            ORDER BY m.nombre;
+
+        OPEN p_vacunas FOR
+            SELECT
+                TRIM(idVacuna) AS id,
+                nombre,
+                laboratorio,
+                lote,
+                TO_CHAR(fechaVencimiento, 'YYYY-MM-DD') AS fechaVencimiento,
+                especieObjetivo,
+                precio
+            FROM VACUNA
+            ORDER BY nombre;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'APLICACION_VACUNA',
+                'CATALOGOS',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_catalogos_vacunacion;
     PROCEDURE pr_insertar_aplicacion_vacuna(p_codigoMascota IN APLICACION_VACUNA.codigoMascota%TYPE,
         p_idVacuna IN APLICACION_VACUNA.idVacuna%TYPE, p_fechaAplicacion IN APLICACION_VACUNA.fechaAplicacion%TYPE,
         p_observacion IN APLICACION_VACUNA.observacion%TYPE) IS

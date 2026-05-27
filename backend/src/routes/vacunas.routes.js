@@ -2,12 +2,17 @@ const express = require("express");
 const router = express.Router();
 const { getConnection } = require("../db");
 
+const {
+    cursorToRows,
+    outCursor,
+    outNumber,
+    outString,
+    normalizarTexto,
+    normalizarId,
+} = require("../plsql");
+
 function esFechaValida(fecha) {
     return /^\d{4}-\d{2}-\d{2}$/.test(fecha || "");
-}
-
-function normalizarTexto(valor) {
-    return valor?.trim() || null;
 }
 
 function validarVacuna(
@@ -30,8 +35,8 @@ function validarVacuna(
         return "El precio de la vacuna es obligatorio.";
     }
 
-    if (Number(precio) < 0) {
-        return "El precio de la vacuna no puede ser negativo.";
+    if (Number(precio) < 0 || Number.isNaN(Number(precio))) {
+        return "El precio de la vacuna debe ser un número mayor o igual a cero.";
     }
 
     return null;
@@ -71,6 +76,13 @@ function manejarErrorOracle(error, res, mensajeBase) {
         });
     }
 
+    if (error.errorNum === 20001 || error.errorNum === 20999) {
+        return res.status(404).json({
+            message: "Registro no encontrado.",
+            error: error.message,
+        });
+    }
+
     if (error.errorNum === 2291) {
         return res.status(400).json({
             message: "La mascota o vacuna seleccionada no existe.",
@@ -93,6 +105,13 @@ function manejarErrorOracle(error, res, mensajeBase) {
         });
     }
 
+    if (error.errorNum === 12899) {
+        return res.status(400).json({
+            message: "Uno de los campos supera la longitud permitida por la base de datos.",
+            error: error.message,
+        });
+    }
+
     if (error.errorNum === 20004) {
         return res.status(400).json({
             message:
@@ -109,7 +128,6 @@ function manejarErrorOracle(error, res, mensajeBase) {
 
 /**
  * GET /api/vacunas/catalogos
- * Devuelve mascotas y vacunas para selects.
  */
 router.get("/catalogos", async (req, res) => {
     let connection;
@@ -117,249 +135,30 @@ router.get("/catalogos", async (req, res) => {
     try {
         connection = await getConnection();
 
-        const [mascotasResult, vacunasResult] = await Promise.all([
-            connection.execute(`
-        SELECT
-          TRIM(m.codigoMascota) AS "id",
-          m.nombre AS "nombre",
-          m.especie AS "especie",
-          TRIM(c.idCliente) AS "clienteId",
-          c.nombreCompleto AS "clienteNombre"
-        FROM MASCOTA m
-        JOIN CLIENTE c ON c.idCliente = m.idCliente
-        ORDER BY m.nombre
-      `),
-            connection.execute(`
-        SELECT
-          TRIM(idVacuna) AS "id",
-          nombre AS "nombre",
-          laboratorio AS "laboratorio",
-          lote AS "lote",
-          TO_CHAR(fechaVencimiento, 'YYYY-MM-DD') AS "fechaVencimiento",
-          especieObjetivo AS "especieObjetivo",
-          precio AS "precio"
-        FROM VACUNA
-        ORDER BY nombre
-      `),
-        ]);
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_VACUNACION.pr_catalogos_vacunacion(
+                    :p_mascotas,
+                    :p_vacunas
+                );
+            END;
+            `,
+            {
+                p_mascotas: outCursor(),
+                p_vacunas: outCursor(),
+            }
+        );
+
+        const mascotas = await cursorToRows(result.outBinds.p_mascotas);
+        const vacunas = await cursorToRows(result.outBinds.p_vacunas);
 
         res.json({
-            mascotas: mascotasResult.rows,
-            vacunas: vacunasResult.rows,
+            mascotas,
+            vacunas,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando catálogos de vacunas");
-    } finally {
-        if (connection) await connection.close();
-    }
-});
-
-/**
- * GET /api/vacunas
- */
-router.get("/", async (req, res) => {
-    let connection;
-
-    try {
-        connection = await getConnection();
-
-        const result = await connection.execute(`
-      SELECT
-        TRIM(idVacuna) AS "id",
-        nombre AS "nombre",
-        laboratorio AS "laboratorio",
-        lote AS "lote",
-        TO_CHAR(fechaVencimiento, 'YYYY-MM-DD') AS "fechaVencimiento",
-        especieObjetivo AS "especieObjetivo",
-        precio AS "precio"
-      FROM VACUNA
-      ORDER BY nombre
-    `);
-
-        res.json(result.rows);
-    } catch (error) {
-        manejarErrorOracle(error, res, "Error consultando vacunas");
-    } finally {
-        if (connection) await connection.close();
-    }
-});
-
-/**
- * POST /api/vacunas
- */
-router.post("/", async (req, res) => {
-    let connection;
-
-    const {
-        id,
-        nombre,
-        laboratorio = null,
-        lote = null,
-        fechaVencimiento = null,
-        especieObjetivo = null,
-        precio = 0,
-    } = req.body;
-
-    const errorValidacion = validarVacuna(
-        { id, nombre, fechaVencimiento, precio },
-        true
-    );
-
-    if (errorValidacion) {
-        return res.status(400).json({ message: errorValidacion });
-    }
-
-    try {
-        connection = await getConnection();
-
-        await connection.execute(
-            `
-      INSERT INTO VACUNA (
-        idVacuna,
-        nombre,
-        laboratorio,
-        lote,
-        fechaVencimiento,
-        especieObjetivo,
-        precio
-      ) VALUES (
-        :id,
-        :nombre,
-        :laboratorio,
-        :lote,
-        CASE
-          WHEN :fechaVencimiento IS NULL THEN NULL
-          ELSE TO_DATE(:fechaVencimiento, 'YYYY-MM-DD')
-        END,
-        :especieObjetivo,
-        :precio
-      )
-      `,
-            {
-                id: id.trim(),
-                nombre: nombre.trim(),
-                laboratorio: normalizarTexto(laboratorio),
-                lote: normalizarTexto(lote),
-                fechaVencimiento: normalizarTexto(fechaVencimiento),
-                especieObjetivo: normalizarTexto(especieObjetivo)?.toUpperCase() || null,
-                precio: Number(precio),
-            },
-            { autoCommit: true }
-        );
-
-        res.status(201).json({
-            message: "Vacuna creada correctamente",
-        });
-    } catch (error) {
-        manejarErrorOracle(error, res, "Error creando vacuna");
-    } finally {
-        if (connection) await connection.close();
-    }
-});
-
-/**
- * PUT /api/vacunas/:id
- */
-router.put("/:id", async (req, res) => {
-    let connection;
-
-    const id = req.params.id;
-
-    const {
-        nombre,
-        laboratorio = null,
-        lote = null,
-        fechaVencimiento = null,
-        especieObjetivo = null,
-        precio = 0,
-    } = req.body;
-
-    const errorValidacion = validarVacuna(
-        { nombre, fechaVencimiento, precio },
-        false
-    );
-
-    if (errorValidacion) {
-        return res.status(400).json({ message: errorValidacion });
-    }
-
-    try {
-        connection = await getConnection();
-
-        const result = await connection.execute(
-            `
-      UPDATE VACUNA
-      SET
-        nombre = :nombre,
-        laboratorio = :laboratorio,
-        lote = :lote,
-        fechaVencimiento = CASE
-          WHEN :fechaVencimiento IS NULL THEN NULL
-          ELSE TO_DATE(:fechaVencimiento, 'YYYY-MM-DD')
-        END,
-        especieObjetivo = :especieObjetivo,
-        precio = :precio
-      WHERE idVacuna = :id
-      `,
-            {
-                id,
-                nombre: nombre.trim(),
-                laboratorio: normalizarTexto(laboratorio),
-                lote: normalizarTexto(lote),
-                fechaVencimiento: normalizarTexto(fechaVencimiento),
-                especieObjetivo: normalizarTexto(especieObjetivo)?.toUpperCase() || null,
-                precio: Number(precio),
-            },
-            { autoCommit: true }
-        );
-
-        if (result.rowsAffected === 0) {
-            return res.status(404).json({
-                message: "Vacuna no encontrada",
-            });
-        }
-
-        res.json({
-            message: "Vacuna actualizada correctamente",
-        });
-    } catch (error) {
-        manejarErrorOracle(error, res, "Error actualizando vacuna");
-    } finally {
-        if (connection) await connection.close();
-    }
-});
-
-/**
- * DELETE /api/vacunas/:id
- */
-router.delete("/:id", async (req, res) => {
-    let connection;
-
-    const id = req.params.id;
-
-    try {
-        connection = await getConnection();
-
-        const result = await connection.execute(
-            `
-      DELETE FROM VACUNA
-      WHERE idVacuna = :id
-      `,
-            { id },
-            { autoCommit: true }
-        );
-
-        if (result.rowsAffected === 0) {
-            return res.status(404).json({
-                message: "Vacuna no encontrada",
-            });
-        }
-
-        res.json({
-            message: "Vacuna eliminada correctamente",
-        });
-    } catch (error) {
-        manejarErrorOracle(error, res, "Error eliminando vacuna");
     } finally {
         if (connection) await connection.close();
     }
@@ -374,32 +173,18 @@ router.get("/aplicaciones", async (req, res) => {
     try {
         connection = await getConnection();
 
-        const result = await connection.execute(`
-      SELECT
-        TRIM(av.codigoMascota) AS "codigoMascota",
-        TRIM(av.idVacuna) AS "idVacuna",
-        TO_CHAR(av.fechaAplicacion, 'YYYY-MM-DD') AS "fechaAplicacion",
-        av.observacion AS "observacion",
-        m.nombre AS "mascotaNombre",
-        m.especie AS "mascotaEspecie",
-        TRIM(c.idCliente) AS "clienteId",
-        c.nombreCompleto AS "clienteNombre",
-        v.nombre AS "vacunaNombre",
-        v.laboratorio AS "laboratorio",
-        v.lote AS "lote",
-        v.especieObjetivo AS "especieObjetivo",
-        v.precio AS "precio"
-      FROM APLICACION_VACUNA av
-      JOIN MASCOTA m ON m.codigoMascota = av.codigoMascota
-      JOIN CLIENTE c ON c.idCliente = m.idCliente
-      JOIN VACUNA v ON v.idVacuna = av.idVacuna
-      ORDER BY av.fechaAplicacion DESC, m.nombre, v.nombre
-    `);
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_VACUNACION.pr_listar_aplicaciones_vacuna(:p_cursor);
+            END;
+            `,
+            {
+                p_cursor: outCursor(),
+            }
+        );
 
-        const rows = result.rows.map((row) => ({
-            ...row,
-            id: `${row.codigoMascota}|${row.idVacuna}|${row.fechaAplicacion}`,
-        }));
+        const rows = await cursorToRows(result.outBinds.p_cursor);
 
         res.json(rows);
     } catch (error) {
@@ -437,28 +222,27 @@ router.post("/aplicaciones", async (req, res) => {
 
         await connection.execute(
             `
-      INSERT INTO APLICACION_VACUNA (
-        codigoMascota,
-        idVacuna,
-        fechaAplicacion,
-        observacion
-      ) VALUES (
-        :codigoMascota,
-        :idVacuna,
-        TO_DATE(:fechaAplicacion, 'YYYY-MM-DD'),
-        :observacion
-      )
-      `,
+            BEGIN
+                PKG_VACUNACION.pr_insertar_aplicacion_vacuna(
+                    :p_codigoMascota,
+                    :p_idVacuna,
+                    TO_DATE(:p_fechaAplicacion, 'YYYY-MM-DD'),
+                    :p_observacion
+                );
+            END;
+            `,
             {
-                codigoMascota: codigoMascota.trim(),
-                idVacuna: idVacuna.trim(),
-                fechaAplicacion,
-                observacion: normalizarTexto(observacion),
+                p_codigoMascota: normalizarId(codigoMascota),
+                p_idVacuna: normalizarId(idVacuna),
+                p_fechaAplicacion: fechaAplicacion,
+                p_observacion: normalizarTexto(observacion),
             },
             { autoCommit: true }
         );
 
         res.status(201).json({
+            ok: true,
+            action: "CREATED",
             message: "Aplicación de vacuna registrada correctamente",
         });
     } catch (error) {
@@ -470,9 +254,6 @@ router.post("/aplicaciones", async (req, res) => {
 
 /**
  * PUT /api/vacunas/aplicaciones
- *
- * Nota:
- * La clave compuesta no se edita. Este endpoint actualiza la observación.
  */
 router.put("/aplicaciones", async (req, res) => {
     let connection;
@@ -499,29 +280,31 @@ router.put("/aplicaciones", async (req, res) => {
 
         const result = await connection.execute(
             `
-      UPDATE APLICACION_VACUNA
-      SET observacion = :observacion
-      WHERE codigoMascota = :codigoMascota
-        AND idVacuna = :idVacuna
-        AND TRUNC(fechaAplicacion) = TO_DATE(:fechaAplicacion, 'YYYY-MM-DD')
-      `,
+            BEGIN
+                PKG_VACUNACION.pr_modificar_aplicacion_vacuna(
+                    :p_codigoMascota,
+                    :p_idVacuna,
+                    TO_DATE(:p_fechaAplicacion, 'YYYY-MM-DD'),
+                    :p_observacion,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
             {
-                codigoMascota: codigoMascota.trim(),
-                idVacuna: idVacuna.trim(),
-                fechaAplicacion,
-                observacion: normalizarTexto(observacion),
+                p_codigoMascota: normalizarId(codigoMascota),
+                p_idVacuna: normalizarId(idVacuna),
+                p_fechaAplicacion: fechaAplicacion,
+                p_observacion: normalizarTexto(observacion),
+                p_filas_afectadas: outNumber(),
             },
             { autoCommit: true }
         );
 
-        if (result.rowsAffected === 0) {
-            return res.status(404).json({
-                message: "Aplicación de vacuna no encontrada",
-            });
-        }
-
         res.json({
+            ok: true,
+            action: "UPDATED",
             message: "Aplicación de vacuna actualizada correctamente",
+            filasAfectadas: result.outBinds.p_filas_afectadas,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error actualizando aplicación de vacuna");
@@ -531,15 +314,16 @@ router.put("/aplicaciones", async (req, res) => {
 });
 
 /**
- * DELETE /api/vacunas/aplicaciones?codigoMascota=&idVacuna=&fechaAplicacion=
+ * DELETE /api/vacunas/aplicaciones
  */
 router.delete("/aplicaciones", async (req, res) => {
     let connection;
 
-    const codigoMascota = req.query.codigoMascota || req.body.codigoMascota;
-    const idVacuna = req.query.idVacuna || req.body.idVacuna;
-    const fechaAplicacion =
-        req.query.fechaAplicacion || req.body.fechaAplicacion;
+    const {
+        codigoMascota,
+        idVacuna,
+        fechaAplicacion,
+    } = req.body;
 
     const errorValidacion = validarAplicacionVacuna({
         codigoMascota,
@@ -556,30 +340,291 @@ router.delete("/aplicaciones", async (req, res) => {
 
         const result = await connection.execute(
             `
-      DELETE FROM APLICACION_VACUNA
-      WHERE codigoMascota = :codigoMascota
-        AND idVacuna = :idVacuna
-        AND TRUNC(fechaAplicacion) = TO_DATE(:fechaAplicacion, 'YYYY-MM-DD')
-      `,
+            BEGIN
+                PKG_VACUNACION.pr_eliminar_aplicacion_vacuna(
+                    :p_codigoMascota,
+                    :p_idVacuna,
+                    TO_DATE(:p_fechaAplicacion, 'YYYY-MM-DD'),
+                    :p_filas_afectadas
+                );
+            END;
+            `,
             {
-                codigoMascota: String(codigoMascota).trim(),
-                idVacuna: String(idVacuna).trim(),
-                fechaAplicacion: String(fechaAplicacion),
+                p_codigoMascota: normalizarId(codigoMascota),
+                p_idVacuna: normalizarId(idVacuna),
+                p_fechaAplicacion: fechaAplicacion,
+                p_filas_afectadas: outNumber(),
             },
             { autoCommit: true }
         );
 
-        if (result.rowsAffected === 0) {
-            return res.status(404).json({
-                message: "Aplicación de vacuna no encontrada",
-            });
-        }
-
         res.json({
+            ok: true,
+            action: "DELETED",
             message: "Aplicación de vacuna eliminada correctamente",
+            filasAfectadas: result.outBinds.p_filas_afectadas,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error eliminando aplicación de vacuna");
+    } finally {
+        if (connection) await connection.close();
+    }
+});
+
+/**
+ * GET /api/vacunas
+ */
+router.get("/", async (req, res) => {
+    let connection;
+
+    try {
+        connection = await getConnection();
+
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_INVENTARIO_MEDICO.pr_listar_vacunas(:p_cursor);
+            END;
+            `,
+            {
+                p_cursor: outCursor(),
+            }
+        );
+
+        const rows = await cursorToRows(result.outBinds.p_cursor);
+
+        res.json(rows);
+    } catch (error) {
+        manejarErrorOracle(error, res, "Error consultando vacunas");
+    } finally {
+        if (connection) await connection.close();
+    }
+});
+
+/**
+ * GET /api/vacunas/:id
+ */
+router.get("/:id", async (req, res) => {
+    let connection;
+
+    const id = normalizarId(req.params.id);
+
+    try {
+        connection = await getConnection();
+
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_INVENTARIO_MEDICO.pr_obtener_vacuna(
+                    :p_idVacuna,
+                    :p_cursor
+                );
+            END;
+            `,
+            {
+                p_idVacuna: id,
+                p_cursor: outCursor(),
+            }
+        );
+
+        const rows = await cursorToRows(result.outBinds.p_cursor);
+
+        if (rows.length === 0) {
+            return res.status(404).json({
+                message: "Vacuna no encontrada",
+            });
+        }
+
+        res.json(rows[0]);
+    } catch (error) {
+        manejarErrorOracle(error, res, "Error consultando vacuna");
+    } finally {
+        if (connection) await connection.close();
+    }
+});
+
+/**
+ * POST /api/vacunas
+ */
+router.post("/", async (req, res) => {
+    let connection;
+
+    const {
+        id,
+        nombre,
+        laboratorio = null,
+        lote = null,
+        fechaVencimiento = null,
+        especieObjetivo = null,
+        precio = 0,
+    } = req.body;
+
+    const errorValidacion = validarVacuna(
+        { id, nombre, fechaVencimiento, precio },
+        true
+    );
+
+    if (errorValidacion) {
+        return res.status(400).json({ message: errorValidacion });
+    }
+
+    try {
+        connection = await getConnection();
+
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_INVENTARIO_MEDICO.pr_insertar_vacuna(
+                    :p_idVacuna,
+                    :p_nombre,
+                    :p_laboratorio,
+                    :p_lote,
+                    CASE
+                        WHEN :p_fechaVencimiento IS NULL THEN NULL
+                        ELSE TO_DATE(:p_fechaVencimiento, 'YYYY-MM-DD')
+                    END,
+                    :p_especieObjetivo,
+                    :p_precio,
+                    :p_idVacuna_out
+                );
+            END;
+            `,
+            {
+                p_idVacuna: normalizarId(id),
+                p_nombre: nombre.trim(),
+                p_laboratorio: normalizarTexto(laboratorio),
+                p_lote: normalizarTexto(lote),
+                p_fechaVencimiento: normalizarTexto(fechaVencimiento),
+                p_especieObjetivo: normalizarTexto(especieObjetivo),
+                p_precio: Number(precio),
+                p_idVacuna_out: outString(30),
+            },
+            { autoCommit: true }
+        );
+
+        res.status(201).json({
+            ok: true,
+            action: "CREATED",
+            message: "Vacuna creada correctamente",
+            id: result.outBinds.p_idVacuna_out,
+        });
+    } catch (error) {
+        manejarErrorOracle(error, res, "Error creando vacuna");
+    } finally {
+        if (connection) await connection.close();
+    }
+});
+
+/**
+ * PUT /api/vacunas/:id
+ */
+router.put("/:id", async (req, res) => {
+    let connection;
+
+    const id = normalizarId(req.params.id);
+
+    const {
+        nombre,
+        laboratorio = null,
+        lote = null,
+        fechaVencimiento = null,
+        especieObjetivo = null,
+        precio = 0,
+    } = req.body;
+
+    const errorValidacion = validarVacuna(
+        { nombre, fechaVencimiento, precio },
+        false
+    );
+
+    if (errorValidacion) {
+        return res.status(400).json({ message: errorValidacion });
+    }
+
+    try {
+        connection = await getConnection();
+
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_INVENTARIO_MEDICO.pr_modificar_vacuna(
+                    :p_idVacuna,
+                    :p_nombre,
+                    :p_laboratorio,
+                    :p_lote,
+                    CASE
+                        WHEN :p_fechaVencimiento IS NULL THEN NULL
+                        ELSE TO_DATE(:p_fechaVencimiento, 'YYYY-MM-DD')
+                    END,
+                    :p_especieObjetivo,
+                    :p_precio,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
+            {
+                p_idVacuna: id,
+                p_nombre: nombre.trim(),
+                p_laboratorio: normalizarTexto(laboratorio),
+                p_lote: normalizarTexto(lote),
+                p_fechaVencimiento: normalizarTexto(fechaVencimiento),
+                p_especieObjetivo: normalizarTexto(especieObjetivo),
+                p_precio: Number(precio),
+                p_filas_afectadas: outNumber(),
+            },
+            { autoCommit: true }
+        );
+
+        res.json({
+            ok: true,
+            action: "UPDATED",
+            message: "Vacuna actualizada correctamente",
+            id,
+            filasAfectadas: result.outBinds.p_filas_afectadas,
+        });
+    } catch (error) {
+        manejarErrorOracle(error, res, "Error actualizando vacuna");
+    } finally {
+        if (connection) await connection.close();
+    }
+});
+
+/**
+ * DELETE /api/vacunas/:id
+ */
+router.delete("/:id", async (req, res) => {
+    let connection;
+
+    const id = normalizarId(req.params.id);
+
+    try {
+        connection = await getConnection();
+
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_INVENTARIO_MEDICO.pr_eliminar_vacuna(
+                    :p_idVacuna,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
+            {
+                p_idVacuna: id,
+                p_filas_afectadas: outNumber(),
+            },
+            { autoCommit: true }
+        );
+
+        res.json({
+            ok: true,
+            action: "DELETED",
+            message: "Vacuna eliminada correctamente",
+            id,
+            filasAfectadas: result.outBinds.p_filas_afectadas,
+        });
+    } catch (error) {
+        manejarErrorOracle(error, res, "Error eliminando vacuna");
     } finally {
         if (connection) await connection.close();
     }

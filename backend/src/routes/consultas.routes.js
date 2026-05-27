@@ -2,12 +2,16 @@ const express = require("express");
 const router = express.Router();
 const { getConnection } = require("../db");
 
+const {
+    cursorToRows,
+    outCursor,
+    outNumber,
+    outString,
+    normalizarTexto,
+} = require("../plsql");
+
 function esFechaValida(fecha) {
     return /^\d{4}-\d{2}-\d{2}$/.test(fecha || "");
-}
-
-function normalizarTexto(valor) {
-    return valor?.trim() || null;
 }
 
 function normalizarNumero(valor) {
@@ -19,15 +23,13 @@ function normalizarNumero(valor) {
     return Number.isFinite(numero) ? numero : NaN;
 }
 
-function validarConsulta(
-    {
-        idCita,
-        idServicio,
-        temperatura,
-        pesoConsulta,
-        fechaAtencionReal,
-    },
-) {
+function validarConsulta({
+    idCita,
+    idServicio,
+    temperatura,
+    pesoConsulta,
+    fechaAtencionReal,
+}) {
     if (!idCita?.trim()) {
         return "La cita es obligatoria.";
     }
@@ -76,6 +78,13 @@ function manejarErrorOracle(error, res, mensajeBase) {
         });
     }
 
+    if (error.errorNum === 20001 || error.errorNum === 20999) {
+        return res.status(404).json({
+            message: "Consulta veterinaria no encontrada",
+            error: error.message,
+        });
+    }
+
     if (error.errorNum === 2291) {
         return res.status(400).json({
             message: "La cita o el servicio seleccionado no existe.",
@@ -98,31 +107,21 @@ function manejarErrorOracle(error, res, mensajeBase) {
         });
     }
 
+    if (error.errorNum === 12899) {
+        return res.status(400).json({
+            message: "Uno de los campos supera la longitud permitida por la base de datos.",
+            error: error.message,
+        });
+    }
+
     return res.status(500).json({
         message: mensajeBase,
         error: error.message,
     });
 }
 
-async function generarIdConsulta(connection) {
-    const result = await connection.execute(`
-    SELECT
-      'CON' ||
-      LPAD(
-        NVL(MAX(TO_NUMBER(REGEXP_SUBSTR(TRIM(idConsulta), '[0-9]+$'))), 0) + 1,
-        6,
-        '0'
-      ) AS "id"
-    FROM CONSULTA_VETERINARIA
-    WHERE REGEXP_LIKE(TRIM(idConsulta), '^CON[0-9]+$')
-  `);
-
-    return result.rows[0].id;
-}
-
 /**
  * GET /api/consultas/catalogos
- * Devuelve citas sin consulta y servicios activos para selects.
  */
 router.get("/catalogos", async (req, res) => {
     let connection;
@@ -130,52 +129,27 @@ router.get("/catalogos", async (req, res) => {
     try {
         connection = await getConnection();
 
-        const [citasResult, serviciosResult] = await Promise.all([
-            connection.execute(`
-        SELECT
-          TRIM(ci.idCita) AS "id",
-          TO_CHAR(ci.fecha, 'YYYY-MM-DD') AS "fecha",
-          TO_CHAR(EXTRACT(HOUR FROM ci.hora), 'FM00') || ':' ||
-          TO_CHAR(EXTRACT(MINUTE FROM ci.hora), 'FM00') AS "hora",
-          ci.motivoConsulta AS "motivo",
-          ci.estadoCita AS "estado",
-          TRIM(ma.codigoMascota) AS "mascotaId",
-          ma.nombre AS "mascotaNombre",
-          ma.especie AS "mascotaEspecie",
-          TRIM(cl.idCliente) AS "clienteId",
-          cl.nombreCompleto AS "clienteNombre",
-          cl.telefono AS "clienteTelefono",
-          TRIM(ev.idEmpleado) AS "veterinarioId",
-          ev.nombreCompleto AS "veterinarioNombre"
-        FROM CITA ci
-        JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
-        JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
-        JOIN EMPLEADO ev ON ev.idEmpleado = ci.idVeterinario
-        WHERE ci.estadoCita IN ('PROGRAMADA', 'CONFIRMADA', 'ATENDIDA')
-          AND NOT EXISTS (
-            SELECT 1
-            FROM CONSULTA_VETERINARIA cv
-            WHERE cv.idCita = ci.idCita
-          )
-        ORDER BY ci.fecha DESC, ci.hora DESC
-      `),
-            connection.execute(`
-        SELECT
-          TRIM(idServicio) AS "id",
-          nombre AS "nombre",
-          tipoServicio AS "tipoServicio",
-          precio AS "precio",
-          descripcion AS "descripcion",
-          activo AS "activo"
-        FROM CATALOGO_SERVICIOS
-        WHERE activo = 'S'
-        ORDER BY nombre
-      `),
-        ]);
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_catalogos_consultas(
+                    :p_citas,
+                    :p_servicios
+                );
+            END;
+            `,
+            {
+                p_citas: outCursor(),
+                p_servicios: outCursor(),
+            }
+        );
+
+        const citasDisponibles = await cursorToRows(result.outBinds.p_citas);
+        const servicios = await cursorToRows(result.outBinds.p_servicios);
 
         res.json({
-            citasDisponibles: citasResult.rows,
-            servicios: serviciosResult.rows,
+            citasDisponibles,
+            servicios,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando catálogos de consultas");
@@ -193,49 +167,64 @@ router.get("/", async (req, res) => {
     try {
         connection = await getConnection();
 
-        const result = await connection.execute(`
-      SELECT
-        TRIM(cv.idConsulta) AS "id",
-        TRIM(cv.idCita) AS "idCita",
-        TRIM(cv.idServicio) AS "idServicio",
-        cv.temperatura AS "temperatura",
-        cv.pesoConsulta AS "pesoConsulta",
-        cv.observaciones AS "observaciones",
-        cv.recomendaciones AS "recomendaciones",
-        TO_CHAR(cv.fechaAtencionReal, 'YYYY-MM-DD') AS "fechaAtencionReal",
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_listar_consultas(:p_cursor);
+            END;
+            `,
+            {
+                p_cursor: outCursor(),
+            }
+        );
 
-        TO_CHAR(ci.fecha, 'YYYY-MM-DD') AS "citaFecha",
-        TO_CHAR(EXTRACT(HOUR FROM ci.hora), 'FM00') || ':' ||
-        TO_CHAR(EXTRACT(MINUTE FROM ci.hora), 'FM00') AS "citaHora",
-        ci.motivoConsulta AS "motivo",
-        ci.estadoCita AS "citaEstado",
+        const rows = await cursorToRows(result.outBinds.p_cursor);
 
-        TRIM(ma.codigoMascota) AS "mascotaId",
-        ma.nombre AS "mascotaNombre",
-        ma.especie AS "mascotaEspecie",
-
-        TRIM(cl.idCliente) AS "clienteId",
-        cl.nombreCompleto AS "clienteNombre",
-        cl.telefono AS "clienteTelefono",
-
-        TRIM(ev.idEmpleado) AS "veterinarioId",
-        ev.nombreCompleto AS "veterinarioNombre",
-
-        cs.nombre AS "servicioNombre",
-        cs.tipoServicio AS "servicioTipo",
-        cs.precio AS "servicioPrecio"
-      FROM CONSULTA_VETERINARIA cv
-      JOIN CITA ci ON ci.idCita = cv.idCita
-      JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
-      JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
-      JOIN EMPLEADO ev ON ev.idEmpleado = ci.idVeterinario
-      JOIN CATALOGO_SERVICIOS cs ON cs.idServicio = cv.idServicio
-      ORDER BY cv.fechaAtencionReal DESC, ci.fecha DESC, ci.hora DESC
-    `);
-
-        res.json(result.rows);
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando consultas veterinarias");
+    } finally {
+        if (connection) await connection.close();
+    }
+});
+
+/**
+ * GET /api/consultas/:id
+ */
+router.get("/:id", async (req, res) => {
+    let connection;
+
+    const id = String(req.params.id || "").trim().toUpperCase();
+
+    try {
+        connection = await getConnection();
+
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_obtener_consulta(
+                    :p_idConsulta,
+                    :p_cursor
+                );
+            END;
+            `,
+            {
+                p_idConsulta: id,
+                p_cursor: outCursor(),
+            }
+        );
+
+        const rows = await cursorToRows(result.outBinds.p_cursor);
+
+        if (rows.length === 0) {
+            return res.status(404).json({
+                message: "Consulta veterinaria no encontrada",
+            });
+        }
+
+        res.json(rows[0]);
+    } catch (error) {
+        manejarErrorOracle(error, res, "Error consultando consulta veterinaria");
     } finally {
         if (connection) await connection.close();
     }
@@ -273,61 +262,43 @@ router.post("/", async (req, res) => {
     try {
         connection = await getConnection();
 
-        const idConsulta = normalizarTexto(id) || (await generarIdConsulta(connection));
-
-        await connection.execute(
+        const result = await connection.execute(
             `
-      INSERT INTO CONSULTA_VETERINARIA (
-        idConsulta,
-        idCita,
-        idServicio,
-        temperatura,
-        pesoConsulta,
-        observaciones,
-        recomendaciones,
-        fechaAtencionReal
-      ) VALUES (
-        :idConsulta,
-        :idCita,
-        :idServicio,
-        :temperatura,
-        :pesoConsulta,
-        :observaciones,
-        :recomendaciones,
-        TO_DATE(:fechaAtencionReal, 'YYYY-MM-DD')
-      )
-      `,
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_insertar_consulta(
+                    :p_idConsulta,
+                    :p_idCita,
+                    :p_idServicio,
+                    :p_temperatura,
+                    :p_pesoConsulta,
+                    :p_observaciones,
+                    :p_recomendaciones,
+                    TO_DATE(:p_fechaAtencionReal, 'YYYY-MM-DD'),
+                    :p_idConsulta_out
+                );
+            END;
+            `,
             {
-                idConsulta,
-                idCita: idCita.trim(),
-                idServicio: idServicio.trim(),
-                temperatura: normalizarNumero(temperatura),
-                pesoConsulta: normalizarNumero(pesoConsulta),
-                observaciones: normalizarTexto(observaciones),
-                recomendaciones: normalizarTexto(recomendaciones),
-                fechaAtencionReal,
+                p_idConsulta: normalizarTexto(id),
+                p_idCita: String(idCita).trim(),
+                p_idServicio: String(idServicio).trim(),
+                p_temperatura: normalizarNumero(temperatura),
+                p_pesoConsulta: normalizarNumero(pesoConsulta),
+                p_observaciones: normalizarTexto(observaciones),
+                p_recomendaciones: normalizarTexto(recomendaciones),
+                p_fechaAtencionReal: fechaAtencionReal,
+                p_idConsulta_out: outString(30),
             },
+            { autoCommit: true }
         );
-
-        await connection.execute(
-            `
-      UPDATE CITA
-      SET estadoCita = 'ATENDIDA'
-      WHERE idCita = :idCita
-      `,
-            {
-                idCita: idCita.trim(),
-            },
-        );
-
-        await connection.commit();
 
         res.status(201).json({
+            ok: true,
+            action: "CREATED",
             message: "Consulta veterinaria creada correctamente",
-            id: idConsulta,
+            id: result.outBinds.p_idConsulta_out,
         });
     } catch (error) {
-        if (connection) await connection.rollback();
         manejarErrorOracle(error, res, "Error creando consulta veterinaria");
     } finally {
         if (connection) await connection.close();
@@ -340,7 +311,7 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
     let connection;
 
-    const id = req.params.id;
+    const id = String(req.params.id || "").trim().toUpperCase();
 
     const {
         idCita,
@@ -369,54 +340,42 @@ router.put("/:id", async (req, res) => {
 
         const result = await connection.execute(
             `
-      UPDATE CONSULTA_VETERINARIA
-      SET
-        idCita = :idCita,
-        idServicio = :idServicio,
-        temperatura = :temperatura,
-        pesoConsulta = :pesoConsulta,
-        observaciones = :observaciones,
-        recomendaciones = :recomendaciones,
-        fechaAtencionReal = TO_DATE(:fechaAtencionReal, 'YYYY-MM-DD')
-      WHERE idConsulta = :id
-      `,
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_modificar_consulta(
+                    :p_idConsulta,
+                    :p_idCita,
+                    :p_idServicio,
+                    :p_temperatura,
+                    :p_pesoConsulta,
+                    :p_observaciones,
+                    :p_recomendaciones,
+                    TO_DATE(:p_fechaAtencionReal, 'YYYY-MM-DD'),
+                    :p_filas_afectadas
+                );
+            END;
+            `,
             {
-                id,
-                idCita: idCita.trim(),
-                idServicio: idServicio.trim(),
-                temperatura: normalizarNumero(temperatura),
-                pesoConsulta: normalizarNumero(pesoConsulta),
-                observaciones: normalizarTexto(observaciones),
-                recomendaciones: normalizarTexto(recomendaciones),
-                fechaAtencionReal,
+                p_idConsulta: id,
+                p_idCita: String(idCita).trim(),
+                p_idServicio: String(idServicio).trim(),
+                p_temperatura: normalizarNumero(temperatura),
+                p_pesoConsulta: normalizarNumero(pesoConsulta),
+                p_observaciones: normalizarTexto(observaciones),
+                p_recomendaciones: normalizarTexto(recomendaciones),
+                p_fechaAtencionReal: fechaAtencionReal,
+                p_filas_afectadas: outNumber(),
             },
+            { autoCommit: true }
         );
-
-        if (result.rowsAffected === 0) {
-            await connection.rollback();
-            return res.status(404).json({
-                message: "Consulta veterinaria no encontrada",
-            });
-        }
-
-        await connection.execute(
-            `
-      UPDATE CITA
-      SET estadoCita = 'ATENDIDA'
-      WHERE idCita = :idCita
-      `,
-            {
-                idCita: idCita.trim(),
-            },
-        );
-
-        await connection.commit();
 
         res.json({
+            ok: true,
+            action: "UPDATED",
             message: "Consulta veterinaria actualizada correctamente",
+            id,
+            filasAfectadas: result.outBinds.p_filas_afectadas,
         });
     } catch (error) {
-        if (connection) await connection.rollback();
         manejarErrorOracle(error, res, "Error actualizando consulta veterinaria");
     } finally {
         if (connection) await connection.close();
@@ -429,59 +388,35 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
     let connection;
 
-    const id = req.params.id;
+    const id = String(req.params.id || "").trim().toUpperCase();
 
     try {
         connection = await getConnection();
 
-        const consultaActual = await connection.execute(
-            `
-      SELECT TRIM(idCita) AS "idCita"
-      FROM CONSULTA_VETERINARIA
-      WHERE idConsulta = :id
-      `,
-            { id },
-        );
-
-        if (consultaActual.rows.length === 0) {
-            return res.status(404).json({
-                message: "Consulta veterinaria no encontrada",
-            });
-        }
-
-        const idCita = consultaActual.rows[0].idCita;
-
         const result = await connection.execute(
             `
-      DELETE FROM CONSULTA_VETERINARIA
-      WHERE idConsulta = :id
-      `,
-            { id },
+            BEGIN
+                PKG_CONSULTAS_MEDICAS.pr_eliminar_consulta(
+                    :p_idConsulta,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
+            {
+                p_idConsulta: id,
+                p_filas_afectadas: outNumber(),
+            },
+            { autoCommit: true }
         );
-
-        if (result.rowsAffected === 0) {
-            await connection.rollback();
-            return res.status(404).json({
-                message: "Consulta veterinaria no encontrada",
-            });
-        }
-
-        await connection.execute(
-            `
-      UPDATE CITA
-      SET estadoCita = 'CONFIRMADA'
-      WHERE idCita = :idCita
-      `,
-            { idCita },
-        );
-
-        await connection.commit();
 
         res.json({
+            ok: true,
+            action: "DELETED",
             message: "Consulta veterinaria eliminada correctamente",
+            id,
+            filasAfectadas: result.outBinds.p_filas_afectadas,
         });
     } catch (error) {
-        if (connection) await connection.rollback();
         manejarErrorOracle(error, res, "Error eliminando consulta veterinaria");
     } finally {
         if (connection) await connection.close();

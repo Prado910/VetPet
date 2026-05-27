@@ -2,6 +2,15 @@ const express = require("express");
 const router = express.Router();
 const { getConnection } = require("../db");
 
+const {
+    cursorToRows,
+    outCursor,
+    outNumber,
+    outString,
+    normalizarTexto,
+    normalizarId,
+} = require("../plsql");
+
 const estadosValidos = [
     "PROGRAMADA",
     "CONFIRMADA",
@@ -9,10 +18,6 @@ const estadosValidos = [
     "CANCELADA",
     "REPROGRAMADA",
 ];
-
-function normalizarId(valor) {
-    return String(valor || "").trim().toUpperCase();
-}
 
 function horaAMinutos(hora) {
     const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(hora || "");
@@ -81,6 +86,13 @@ function manejarErrorOracle(error, res, mensajeBase) {
         });
     }
 
+    if (error.errorNum === 20001 || error.errorNum === 20999) {
+        return res.status(404).json({
+            message: "Cita no encontrada",
+            error: error.message,
+        });
+    }
+
     if (error.errorNum === 2291) {
         return res.status(400).json({
             message:
@@ -104,54 +116,53 @@ function manejarErrorOracle(error, res, mensajeBase) {
         });
     }
 
+    if (error.errorNum === 12899) {
+        return res.status(400).json({
+            message: "Uno de los campos supera la longitud permitida por la base de datos.",
+            error: error.message,
+        });
+    }
+
     return res.status(500).json({
         message: mensajeBase,
         error: error.message,
     });
 }
 
+/**
+ * GET /api/citas/catalogos
+ */
 router.get("/catalogos", async (req, res) => {
     let connection;
 
     try {
         connection = await getConnection();
 
-        const [mascotasResult, veterinariosResult, recepcionistasResult] =
-            await Promise.all([
-                connection.execute(`
-          SELECT
-            TRIM(m.codigoMascota) AS "id",
-            m.nombre AS "nombre",
-            m.especie AS "especie",
-            c.nombreCompleto AS "clienteNombre"
-          FROM MASCOTA m
-          JOIN CLIENTE c ON c.idCliente = m.idCliente
-          ORDER BY m.nombre
-        `),
-                connection.execute(`
-          SELECT
-            TRIM(v.idEmpleado) AS "id",
-            e.nombreCompleto AS "nombre",
-            v.especialidad AS "especialidad"
-          FROM VETERINARIO v
-          JOIN EMPLEADO e ON e.idEmpleado = v.idEmpleado
-          ORDER BY e.nombreCompleto
-        `),
-                connection.execute(`
-          SELECT
-            TRIM(r.idEmpleado) AS "id",
-            e.nombreCompleto AS "nombre",
-            r.turno AS "turno"
-          FROM RECEPCIONISTA r
-          JOIN EMPLEADO e ON e.idEmpleado = r.idEmpleado
-          ORDER BY e.nombreCompleto
-        `),
-            ]);
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_AGENDAMIENTO.pr_catalogos_citas(
+                    :p_mascotas,
+                    :p_veterinarios,
+                    :p_recepcionistas
+                );
+            END;
+            `,
+            {
+                p_mascotas: outCursor(),
+                p_veterinarios: outCursor(),
+                p_recepcionistas: outCursor(),
+            }
+        );
+
+        const mascotas = await cursorToRows(result.outBinds.p_mascotas);
+        const veterinarios = await cursorToRows(result.outBinds.p_veterinarios);
+        const recepcionistas = await cursorToRows(result.outBinds.p_recepcionistas);
 
         res.json({
-            mascotas: mascotasResult.rows,
-            veterinarios: veterinariosResult.rows,
-            recepcionistas: recepcionistasResult.rows,
+            mascotas,
+            veterinarios,
+            recepcionistas,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando catálogos de citas");
@@ -160,39 +171,29 @@ router.get("/catalogos", async (req, res) => {
     }
 });
 
+/**
+ * GET /api/citas
+ */
 router.get("/", async (req, res) => {
     let connection;
 
     try {
         connection = await getConnection();
 
-        const result = await connection.execute(`
-      SELECT
-        TRIM(ci.idCita) AS "id",
-        TRIM(ci.codigoMascota) AS "mascotaId",
-        ma.nombre AS "mascotaNombre",
-        ma.especie AS "mascotaEspecie",
-        TRIM(cl.idCliente) AS "clienteId",
-        cl.nombreCompleto AS "clienteNombre",
-        cl.telefono AS "clienteTelefono",
-        TRIM(ci.idVeterinario) AS "veterinarioId",
-        ev.nombreCompleto AS "veterinarioNombre",
-        TRIM(ci.idRecepcionista) AS "recepcionistaId",
-        er.nombreCompleto AS "recepcionistaNombre",
-        TO_CHAR(ci.fecha, 'YYYY-MM-DD') AS "fecha",
-        TO_CHAR(EXTRACT(HOUR FROM ci.hora), 'FM00') || ':' ||
-        TO_CHAR(EXTRACT(MINUTE FROM ci.hora), 'FM00') AS "hora",
-        ci.motivoConsulta AS "motivo",
-        ci.estadoCita AS "estado"
-      FROM CITA ci
-      JOIN MASCOTA ma ON ma.codigoMascota = ci.codigoMascota
-      JOIN CLIENTE cl ON cl.idCliente = ma.idCliente
-      JOIN EMPLEADO ev ON ev.idEmpleado = ci.idVeterinario
-      JOIN EMPLEADO er ON er.idEmpleado = ci.idRecepcionista
-      ORDER BY ci.fecha DESC, ci.hora DESC
-    `);
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_AGENDAMIENTO.pr_listar_citas(:p_cursor);
+            END;
+            `,
+            {
+                p_cursor: outCursor(),
+            }
+        );
 
-        res.json(result.rows);
+        const rows = await cursorToRows(result.outBinds.p_cursor);
+
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando citas");
     } finally {
@@ -200,6 +201,51 @@ router.get("/", async (req, res) => {
     }
 });
 
+/**
+ * GET /api/citas/:id
+ */
+router.get("/:id", async (req, res) => {
+    let connection;
+
+    const id = normalizarId(req.params.id);
+
+    try {
+        connection = await getConnection();
+
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_AGENDAMIENTO.pr_obtener_cita(
+                    :p_idCita,
+                    :p_cursor
+                );
+            END;
+            `,
+            {
+                p_idCita: id,
+                p_cursor: outCursor(),
+            }
+        );
+
+        const rows = await cursorToRows(result.outBinds.p_cursor);
+
+        if (rows.length === 0) {
+            return res.status(404).json({
+                message: "Cita no encontrada",
+            });
+        }
+
+        res.json(rows[0]);
+    } catch (error) {
+        manejarErrorOracle(error, res, "Error consultando cita");
+    } finally {
+        if (connection) await connection.close();
+    }
+});
+
+/**
+ * POST /api/citas
+ */
 router.post("/", async (req, res) => {
     let connection;
 
@@ -234,43 +280,41 @@ router.post("/", async (req, res) => {
     try {
         connection = await getConnection();
 
-        await connection.execute(
+        const result = await connection.execute(
             `
-      INSERT INTO CITA (
-        idCita,
-        codigoMascota,
-        idVeterinario,
-        idRecepcionista,
-        fecha,
-        hora,
-        motivoConsulta,
-        estadoCita
-      ) VALUES (
-        :id,
-        :mascotaId,
-        :veterinarioId,
-        :recepcionistaId,
-        TO_DATE(:fecha, 'YYYY-MM-DD'),
-        NUMTODSINTERVAL(:horaMinutos, 'MINUTE'),
-        :motivo,
-        :estado
-      )
-      `,
+            BEGIN
+                PKG_AGENDAMIENTO.pr_insertar_cita(
+                    :p_idCita,
+                    :p_codigoMascota,
+                    :p_idVeterinario,
+                    :p_idRecepcionista,
+                    TO_DATE(:p_fecha, 'YYYY-MM-DD'),
+                    NUMTODSINTERVAL(:p_horaMinutos, 'MINUTE'),
+                    :p_motivoConsulta,
+                    :p_estadoCita,
+                    :p_idCita_out
+                );
+            END;
+            `,
             {
-                id: id.trim(),
-                mascotaId: mascotaId.trim(),
-                veterinarioId: veterinarioId.trim(),
-                recepcionistaId: recepcionistaId.trim(),
-                fecha,
-                horaMinutos: horaAMinutos(hora),
-                motivo: motivo?.trim() || null,
-                estado,
+                p_idCita: normalizarId(id),
+                p_codigoMascota: normalizarId(mascotaId),
+                p_idVeterinario: normalizarId(veterinarioId),
+                p_idRecepcionista: normalizarId(recepcionistaId),
+                p_fecha: fecha,
+                p_horaMinutos: horaAMinutos(hora),
+                p_motivoConsulta: normalizarTexto(motivo),
+                p_estadoCita: estado,
+                p_idCita_out: outString(30),
             },
             { autoCommit: true }
         );
 
         res.status(201).json({
+            ok: true,
+            action: "CREATED",
             message: "Cita creada correctamente",
+            id: result.outBinds.p_idCita_out,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error creando cita");
@@ -279,6 +323,9 @@ router.post("/", async (req, res) => {
     }
 });
 
+/**
+ * PUT /api/citas/:id
+ */
 router.put("/:id", async (req, res) => {
     let connection;
 
@@ -315,38 +362,40 @@ router.put("/:id", async (req, res) => {
 
         const result = await connection.execute(
             `
-      UPDATE CITA
-      SET
-        codigoMascota = :mascotaId,
-        idVeterinario = :veterinarioId,
-        idRecepcionista = :recepcionistaId,
-        fecha = TO_DATE(:fecha, 'YYYY-MM-DD'),
-        hora = NUMTODSINTERVAL(:horaMinutos, 'MINUTE'),
-        motivoConsulta = :motivo,
-        estadoCita = :estado
-      WHERE TRIM(UPPER(idCita)) = :id
-      `,
+            BEGIN
+                PKG_AGENDAMIENTO.pr_modificar_cita(
+                    :p_idCita,
+                    :p_codigoMascota,
+                    :p_idVeterinario,
+                    :p_idRecepcionista,
+                    TO_DATE(:p_fecha, 'YYYY-MM-DD'),
+                    NUMTODSINTERVAL(:p_horaMinutos, 'MINUTE'),
+                    :p_motivoConsulta,
+                    :p_estadoCita,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
             {
-                id,
-                mascotaId: mascotaId.trim(),
-                veterinarioId: veterinarioId.trim(),
-                recepcionistaId: recepcionistaId.trim(),
-                fecha,
-                horaMinutos: horaAMinutos(hora),
-                motivo: motivo?.trim() || null,
-                estado,
+                p_idCita: id,
+                p_codigoMascota: normalizarId(mascotaId),
+                p_idVeterinario: normalizarId(veterinarioId),
+                p_idRecepcionista: normalizarId(recepcionistaId),
+                p_fecha: fecha,
+                p_horaMinutos: horaAMinutos(hora),
+                p_motivoConsulta: normalizarTexto(motivo),
+                p_estadoCita: estado,
+                p_filas_afectadas: outNumber(),
             },
             { autoCommit: true }
         );
 
-        if (result.rowsAffected === 0) {
-            return res.status(404).json({
-                message: "Cita no encontrada",
-            });
-        }
-
         res.json({
+            ok: true,
+            action: "UPDATED",
             message: "Cita actualizada correctamente",
+            id,
+            filasAfectadas: result.outBinds.p_filas_afectadas,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error actualizando cita");
@@ -355,6 +404,9 @@ router.put("/:id", async (req, res) => {
     }
 });
 
+/**
+ * DELETE /api/citas/:id
+ */
 router.delete("/:id", async (req, res) => {
     let connection;
 
@@ -365,21 +417,26 @@ router.delete("/:id", async (req, res) => {
 
         const result = await connection.execute(
             `
-            DELETE FROM CITA
-            WHERE TRIM(UPPER(idCita)) = :id
+            BEGIN
+                PKG_AGENDAMIENTO.pr_eliminar_cita(
+                    :p_idCita,
+                    :p_filas_afectadas
+                );
+            END;
             `,
-            { id },
+            {
+                p_idCita: id,
+                p_filas_afectadas: outNumber(),
+            },
             { autoCommit: true }
         );
 
-        if (result.rowsAffected === 0) {
-            return res.status(404).json({
-                message: "Cita no encontrada",
-            });
-        }
-
         res.json({
+            ok: true,
+            action: "DELETED",
             message: "Cita eliminada correctamente",
+            id,
+            filasAfectadas: result.outBinds.p_filas_afectadas,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error eliminando cita");
