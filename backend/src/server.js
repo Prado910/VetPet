@@ -17,6 +17,7 @@ const facturasRoutes = require("./routes/facturas.routes");
 const dashboardRoutes = require("./routes/dashboard.routes");
 const reportesRoutes = require("./routes/reportes.routes");
 const diccionarioRoutes = require("./routes/diccionario.routes");
+
 const app = express();
 
 app.use(cors());
@@ -41,7 +42,7 @@ app.use("/api/tratamientos", tratamientosRoutes);
 app.use("/api/facturas", facturasRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/reportes", reportesRoutes);
-
+app.use("/api/diccionario", diccionarioRoutes);  // ← esta es la que faltaba
 
 const PORT = process.env.PORT || 3000;
 
