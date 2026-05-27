@@ -115,14 +115,53 @@ function getBadgeVariant(estado: string) {
   }
 }
 
-function normalizarIngresos(data: ReporteIngresoMensual[]) {
-  return data
-    .slice()
-    .sort((a, b) => Number(a.mesNumero) - Number(b.mesNumero))
-    .map((item) => ({
-      mes: mesesCortos[Number(item.mesNumero)] || item.mes,
-      ingresos: Number(item.ingresosPagados || item.valorTotal || 0),
+function normalizarIngresos(data: any) {
+  const meses = [
+    "Ene",
+    "Feb",
+    "Mar",
+    "Abr",
+    "May",
+    "Jun",
+    "Jul",
+    "Ago",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dic",
+  ];
+
+  if (Array.isArray(data)) {
+    return data.slice(-6).map((item: any) => ({
+      mes: item.mesNombre || item.mes || item.MES || "Mes",
+      ingresos: Number(
+        item.ingresos ||
+          item.ingresosPagados ||
+          item.INGRESOS ||
+          item.INGRESOSPAGADOS ||
+          0,
+      ),
     }));
+  }
+
+  if (data && typeof data === "object") {
+    const mesNumero = Number(data.mes || data.MES || new Date().getMonth() + 1);
+
+    return [
+      {
+        mes: meses[mesNumero - 1] || "Mes",
+        ingresos: Number(
+          data.ingresosPagados ||
+            data.INGRESOSPAGADOS ||
+            data.ingresos ||
+            data.INGRESOS ||
+            0,
+        ),
+      },
+    ];
+  }
+
+  return [];
 }
 
 function normalizarTopServicios(data: ReporteTopServicio[]) {

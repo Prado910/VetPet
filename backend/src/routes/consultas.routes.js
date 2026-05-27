@@ -180,7 +180,7 @@ router.get("/", async (req, res) => {
 
         const rows = await cursorToRows(result.outBinds.p_cursor);
 
-        res.json(rows);
+        res.json(normalizarRows(rows));
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando consultas veterinarias");
     } finally {
@@ -222,7 +222,7 @@ router.get("/:id", async (req, res) => {
             });
         }
 
-        res.json(rows[0]);
+        res.json(normalizarRows(rows)[0]);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando consulta veterinaria");
     } finally {

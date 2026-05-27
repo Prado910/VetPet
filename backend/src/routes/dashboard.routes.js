@@ -68,7 +68,7 @@ router.get("/citas-hoy", async (req, res) => {
 
     const rows = await cursorToRows(result.outBinds.p_cursor);
 
-    res.json(rows);
+    res.json(normalizarRows(rows));
   } catch (error) {
     manejarErrorOracle(error, res, "Error consultando citas de hoy");
   } finally {
@@ -107,7 +107,7 @@ router.get("/actividad-reciente", async (req, res) => {
 
     const rows = await cursorToRows(result.outBinds.p_cursor);
 
-    res.json(rows);
+    res.json(normalizarRows(rows));
   } catch (error) {
     manejarErrorOracle(error, res, "Error consultando actividad reciente");
   } finally {
