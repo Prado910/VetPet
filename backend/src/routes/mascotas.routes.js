@@ -2,17 +2,26 @@ const express = require("express");
 const router = express.Router();
 const { getConnection } = require("../db");
 
+const {
+    cursorToRows,
+    outCursor,
+    outNumber,
+    outString,
+    normalizarTexto,
+    normalizarId,
+} = require("../plsql");
+
 const sexosValidos = ["M", "H", null, ""];
 
-function normalizarId(valor) {
-    return String(valor || "").trim().toUpperCase();
+function validarFecha(fecha) {
+    if (!fecha) return true;
+    return /^\d{4}-\d{2}-\d{2}$/.test(fecha);
 }
 
-function validarMascota({ id, clienteId, nombre, sexo, peso, especie }, esCreacion = true) {
-    if (esCreacion && !id?.trim()) {
-        return "El código de la mascota es obligatorio.";
-    }
-
+function validarMascota(
+    { clienteId, nombre, sexo, peso, especie, fechaNacimiento },
+    esCreacion = true
+) {
     if (!clienteId?.trim()) {
         return "El cliente es obligatorio.";
     }
@@ -29,8 +38,17 @@ function validarMascota({ id, clienteId, nombre, sexo, peso, especie }, esCreaci
         return "Sexo inválido. Usa M, H o vacío.";
     }
 
-    if (peso !== null && peso !== undefined && peso !== "" && Number(peso) < 0) {
-        return "El peso no puede ser negativo.";
+    if (!validarFecha(fechaNacimiento)) {
+        return "La fecha de nacimiento debe tener formato YYYY-MM-DD.";
+    }
+
+    if (
+        peso !== null &&
+        peso !== undefined &&
+        peso !== "" &&
+        (Number(peso) < 0 || Number.isNaN(Number(peso)))
+    ) {
+        return "El peso debe ser un número mayor o igual a cero.";
     }
 
     return null;
@@ -46,6 +64,13 @@ function manejarErrorOracle(error, res, mensajeBase) {
         });
     }
 
+    if (error.errorNum === 20001 || error.errorNum === 20999) {
+        return res.status(404).json({
+            message: "Mascota no encontrada",
+            error: error.message,
+        });
+    }
+
     if (error.errorNum === 2291) {
         return res.status(400).json({
             message: "El cliente seleccionado no existe.",
@@ -55,14 +80,22 @@ function manejarErrorOracle(error, res, mensajeBase) {
 
     if (error.errorNum === 2292) {
         return res.status(409).json({
-            message: "No se puede eliminar porque la mascota tiene citas, consultas o registros relacionados.",
+            message:
+                "No se puede eliminar porque la mascota tiene citas, consultas, vacunas u otros registros relacionados.",
             error: error.message,
         });
     }
 
-    if (error.errorNum === 2290) {
+    if (error.errorNum === 2290 || error.errorNum === 1400) {
         return res.status(400).json({
             message: "Los datos no cumplen una restricción de la base de datos.",
+            error: error.message,
+        });
+    }
+
+    if (error.errorNum === 12899) {
+        return res.status(400).json({
+            message: "Uno de los campos supera la longitud permitida por la base de datos.",
             error: error.message,
         });
     }
@@ -79,40 +112,61 @@ router.get("/", async (req, res) => {
     try {
         connection = await getConnection();
 
-        const result = await connection.execute(`
-      SELECT
-        TRIM(m.codigoMascota) AS "id",
-        TRIM(m.idCliente) AS "clienteId",
-        m.nombre AS "nombre",
-        TO_CHAR(m.fechaNacimiento, 'YYYY-MM-DD') AS "fechaNacimiento",
-        CASE
-          WHEN m.fechaNacimiento IS NULL THEN NULL
-          ELSE FLOOR(MONTHS_BETWEEN(SYSDATE, m.fechaNacimiento) / 12)
-        END AS "edad",
-        m.sexo AS "sexo",
-        m.peso AS "peso",
-        m.especie AS "especie",
-        m.raza AS "raza",
-        c.nombreCompleto AS "clienteNombre",
-        es.estadoSalud AS "estadoSalud"
-      FROM MASCOTA m
-      JOIN CLIENTE c ON c.idCliente = m.idCliente
-      LEFT JOIN (
-        SELECT
-          codigoMascota,
-          estadoSalud,
-          ROW_NUMBER() OVER (
-            PARTITION BY codigoMascota
-            ORDER BY fechaRegistro DESC, idEstadoSalud DESC
-          ) AS rn
-        FROM ESTADO_SALUD_MASCOTA
-      ) es ON es.codigoMascota = m.codigoMascota AND es.rn = 1
-      ORDER BY m.nombre
-    `);
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_MASCOTAS.pr_listar_mascotas(:p_cursor);
+            END;
+            `,
+            {
+                p_cursor: outCursor(),
+            }
+        );
 
-        res.json(result.rows);
+        const rows = await cursorToRows(result.outBinds.p_cursor);
+
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando mascotas");
+    } finally {
+        if (connection) await connection.close();
+    }
+});
+
+router.get("/:id", async (req, res) => {
+    let connection;
+
+    const id = normalizarId(req.params.id);
+
+    try {
+        connection = await getConnection();
+
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_MASCOTAS.pr_obtener_mascota(
+                    :p_codigoMascota,
+                    :p_cursor
+                );
+            END;
+            `,
+            {
+                p_codigoMascota: id,
+                p_cursor: outCursor(),
+            }
+        );
+
+        const rows = await cursorToRows(result.outBinds.p_cursor);
+
+        if (rows.length === 0) {
+            return res.status(404).json({
+                message: "Mascota no encontrada",
+            });
+        }
+
+        res.json(rows[0]);
+    } catch (error) {
+        manejarErrorOracle(error, res, "Error consultando mascota");
     } finally {
         if (connection) await connection.close();
     }
@@ -122,7 +176,6 @@ router.post("/", async (req, res) => {
     let connection;
 
     const {
-        id,
         clienteId,
         nombre,
         fechaNacimiento = null,
@@ -133,7 +186,7 @@ router.post("/", async (req, res) => {
     } = req.body;
 
     const errorValidacion = validarMascota(
-        { id, clienteId, nombre, sexo, peso, especie },
+        { clienteId, nombre, sexo, peso, especie, fechaNacimiento },
         true
     );
 
@@ -144,43 +197,45 @@ router.post("/", async (req, res) => {
     try {
         connection = await getConnection();
 
-        await connection.execute(
+        const result = await connection.execute(
             `
-      INSERT INTO MASCOTA (
-        codigoMascota,
-        idCliente,
-        nombre,
-        fechaNacimiento,
-        sexo,
-        peso,
-        especie,
-        raza
-      ) VALUES (
-        :id,
-        :clienteId,
-        :nombre,
-        TO_DATE(:fechaNacimiento, 'YYYY-MM-DD'),
-        :sexo,
-        :peso,
-        :especie,
-        :raza
-      )
-      `,
+            BEGIN
+                PKG_MASCOTAS.pr_insertar_mascota(
+                    :p_idCliente,
+                    :p_nombre,
+                    CASE
+                        WHEN :p_fechaNacimiento IS NULL THEN NULL
+                        ELSE TO_DATE(:p_fechaNacimiento, 'YYYY-MM-DD')
+                    END,
+                    :p_sexo,
+                    :p_peso,
+                    :p_especie,
+                    :p_raza,
+                    :p_codigoMascota
+                );
+            END;
+            `,
             {
-                id: id.trim(),
-                clienteId: clienteId.trim(),
-                nombre: nombre.trim(),
-                fechaNacimiento,
-                sexo: sexo || null,
-                peso: peso === "" ? null : peso,
-                especie: especie.trim(),
-                raza,
+                p_idCliente: normalizarId(clienteId),
+                p_nombre: nombre.trim(),
+                p_fechaNacimiento: normalizarTexto(fechaNacimiento),
+                p_sexo: normalizarTexto(sexo),
+                p_peso:
+                    peso === "" || peso === null || peso === undefined
+                        ? null
+                        : Number(peso),
+                p_especie: especie.trim(),
+                p_raza: normalizarTexto(raza),
+                p_codigoMascota: outString(30),
             },
             { autoCommit: true }
         );
 
         res.status(201).json({
+            ok: true,
+            action: "CREATED",
             message: "Mascota creada correctamente",
+            id: result.outBinds.p_codigoMascota,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error creando mascota");
@@ -205,7 +260,7 @@ router.put("/:id", async (req, res) => {
     } = req.body;
 
     const errorValidacion = validarMascota(
-        { clienteId, nombre, sexo, peso, especie },
+        { clienteId, nombre, sexo, peso, especie, fechaNacimiento },
         false
     );
 
@@ -218,38 +273,46 @@ router.put("/:id", async (req, res) => {
 
         const result = await connection.execute(
             `
-      UPDATE MASCOTA
-      SET
-        idCliente = :clienteId,
-        nombre = :nombre,
-        fechaNacimiento = TO_DATE(:fechaNacimiento, 'YYYY-MM-DD'),
-        sexo = :sexo,
-        peso = :peso,
-        especie = :especie,
-        raza = :raza
-      WHERE TRIM(UPPER(codigoMascota)) = :id
-      `,
+            BEGIN
+                PKG_MASCOTAS.pr_modificar_mascota(
+                    :p_codigoMascota,
+                    :p_idCliente,
+                    :p_nombre,
+                    CASE
+                        WHEN :p_fechaNacimiento IS NULL THEN NULL
+                        ELSE TO_DATE(:p_fechaNacimiento, 'YYYY-MM-DD')
+                    END,
+                    :p_sexo,
+                    :p_peso,
+                    :p_especie,
+                    :p_raza,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
             {
-                id,
-                clienteId: clienteId.trim(),
-                nombre: nombre.trim(),
-                fechaNacimiento,
-                sexo: sexo || null,
-                peso: peso === "" ? null : peso,
-                especie: especie.trim(),
-                raza,
+                p_codigoMascota: id,
+                p_idCliente: normalizarId(clienteId),
+                p_nombre: nombre.trim(),
+                p_fechaNacimiento: normalizarTexto(fechaNacimiento),
+                p_sexo: normalizarTexto(sexo),
+                p_peso:
+                    peso === "" || peso === null || peso === undefined
+                        ? null
+                        : Number(peso),
+                p_especie: especie.trim(),
+                p_raza: normalizarTexto(raza),
+                p_filas_afectadas: outNumber(),
             },
             { autoCommit: true }
         );
 
-        if (result.rowsAffected === 0) {
-            return res.status(404).json({
-                message: "Mascota no encontrada",
-            });
-        }
-
         res.json({
+            ok: true,
+            action: "UPDATED",
             message: "Mascota actualizada correctamente",
+            id,
+            filasAfectadas: result.outBinds.p_filas_afectadas,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error actualizando mascota");
@@ -268,21 +331,26 @@ router.delete("/:id", async (req, res) => {
 
         const result = await connection.execute(
             `
-            DELETE FROM MASCOTA
-            WHERE TRIM(UPPER(codigoMascota)) = :id
+            BEGIN
+                PKG_MASCOTAS.pr_eliminar_mascota(
+                    :p_codigoMascota,
+                    :p_filas_afectadas
+                );
+            END;
             `,
-            { id },
+            {
+                p_codigoMascota: id,
+                p_filas_afectadas: outNumber(),
+            },
             { autoCommit: true }
         );
 
-        if (result.rowsAffected === 0) {
-            return res.status(404).json({
-                message: "Mascota no encontrada",
-            });
-        }
-
         res.json({
+            ok: true,
+            action: "DELETED",
             message: "Mascota eliminada correctamente",
+            id,
+            filasAfectadas: result.outBinds.p_filas_afectadas,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error eliminando mascota");

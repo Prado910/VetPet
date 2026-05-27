@@ -196,6 +196,24 @@ CREATE OR REPLACE PACKAGE PKG_PERSONAL AS
         p_filas_afectadas OUT NUMBER
     );
 
+    PROCEDURE pr_listar_empleados(
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_obtener_empleado(
+        p_idEmpleado IN EMPLEADO.idEmpleado%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_listar_veterinarios(
+        p_soloActivos IN NUMBER DEFAULT 1,
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_listar_recepcionistas(
+        p_soloActivos IN NUMBER DEFAULT 1,
+        p_cursor OUT SYS_REFCURSOR
+    );
     PROCEDURE pr_insertar_empleado(
         p_idEmpleado IN EMPLEADO.idEmpleado%TYPE,
         p_nombreCompleto IN EMPLEADO.nombreCompleto%TYPE,
@@ -372,6 +390,143 @@ CREATE OR REPLACE PACKAGE BODY PKG_PERSONAL AS
             PKG_UTILIDADES.manejar('CLIENTE', 'ELIMINAR', SQLCODE, SQLERRM);
     END pr_eliminar_cliente;
 
+        PROCEDURE pr_listar_empleados(
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(e.idEmpleado) AS id,
+                e.nombreCompleto AS nombre,
+                e.telefono AS telefono,
+                TO_CHAR(e.fechaIngreso, 'YYYY-MM-DD') AS fechaIngreso,
+                e.estadoLaboral AS estadoLaboral,
+                e.tipoEmpleado AS tipoEmpleado,
+                e.salario AS salario,
+                v.especialidad AS especialidad,
+                v.nroMatricula AS nroMatricula,
+                r.turno AS turno
+            FROM EMPLEADO e
+            LEFT JOIN VETERINARIO v ON v.idEmpleado = e.idEmpleado
+            LEFT JOIN RECEPCIONISTA r ON r.idEmpleado = e.idEmpleado
+            ORDER BY e.nombreCompleto;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'EMPLEADO',
+                'LISTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_empleados;
+
+
+    PROCEDURE pr_obtener_empleado(
+        p_idEmpleado IN EMPLEADO.idEmpleado%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(e.idEmpleado) AS id,
+                e.nombreCompleto AS nombre,
+                e.telefono AS telefono,
+                TO_CHAR(e.fechaIngreso, 'YYYY-MM-DD') AS fechaIngreso,
+                e.estadoLaboral AS estadoLaboral,
+                e.tipoEmpleado AS tipoEmpleado,
+                e.salario AS salario,
+                v.especialidad AS especialidad,
+                v.nroMatricula AS nroMatricula,
+                r.turno AS turno
+            FROM EMPLEADO e
+            LEFT JOIN VETERINARIO v ON v.idEmpleado = e.idEmpleado
+            LEFT JOIN RECEPCIONISTA r ON r.idEmpleado = e.idEmpleado
+            WHERE TRIM(UPPER(e.idEmpleado)) = TRIM(UPPER(p_idEmpleado));
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'EMPLEADO',
+                'OBTENER',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_obtener_empleado;
+
+
+    PROCEDURE pr_listar_veterinarios(
+        p_soloActivos IN NUMBER DEFAULT 1,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(v.idEmpleado) AS id,
+                e.nombreCompleto AS nombre,
+                e.telefono AS telefono,
+                TO_CHAR(e.fechaIngreso, 'YYYY-MM-DD') AS fechaIngreso,
+                e.estadoLaboral AS estadoLaboral,
+                e.salario AS salario,
+                v.especialidad AS especialidad,
+                v.nroMatricula AS nroMatricula
+            FROM VETERINARIO v
+            JOIN EMPLEADO e ON e.idEmpleado = v.idEmpleado
+            WHERE (p_soloActivos = 0 OR e.estadoLaboral = 'ACTIVO')
+            ORDER BY e.nombreCompleto;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'VETERINARIO',
+                'LISTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_veterinarios;
+
+
+    PROCEDURE pr_listar_recepcionistas(
+        p_soloActivos IN NUMBER DEFAULT 1,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(r.idEmpleado) AS id,
+                e.nombreCompleto AS nombre,
+                e.telefono AS telefono,
+                TO_CHAR(e.fechaIngreso, 'YYYY-MM-DD') AS fechaIngreso,
+                e.estadoLaboral AS estadoLaboral,
+                e.salario AS salario,
+                r.turno AS turno
+            FROM RECEPCIONISTA r
+            JOIN EMPLEADO e ON e.idEmpleado = r.idEmpleado
+            WHERE (p_soloActivos = 0 OR e.estadoLaboral = 'ACTIVO')
+            ORDER BY e.nombreCompleto;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'RECEPCIONISTA',
+                'LISTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_recepcionistas;
+
     PROCEDURE pr_insertar_empleado(p_idEmpleado IN EMPLEADO.idEmpleado%TYPE, p_nombreCompleto IN EMPLEADO.nombreCompleto%TYPE,
         p_telefono IN EMPLEADO.telefono%TYPE, p_fechaIngreso IN EMPLEADO.fechaIngreso%TYPE,
         p_estadoLaboral IN EMPLEADO.estadoLaboral%TYPE, p_tipoEmpleado IN EMPLEADO.tipoEmpleado%TYPE,
@@ -451,6 +606,14 @@ END PKG_PERSONAL;
 -- 3. PKG_MASCOTAS
 -- ============================================================
 CREATE OR REPLACE PACKAGE PKG_MASCOTAS AS
+    PROCEDURE pr_listar_mascotas(
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_obtener_mascota(
+        p_codigoMascota IN MASCOTA.codigoMascota%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    );
     PROCEDURE pr_insertar_mascota(
         p_codigoMascota IN MASCOTA.codigoMascota%TYPE,
         p_idCliente IN MASCOTA.idCliente%TYPE,
@@ -497,6 +660,103 @@ END PKG_MASCOTAS;
 /
 
 CREATE OR REPLACE PACKAGE BODY PKG_MASCOTAS AS
+    PROCEDURE pr_listar_mascotas(
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(m.codigoMascota) AS id,
+                TRIM(m.idCliente) AS clienteId,
+                m.nombre AS nombre,
+                TO_CHAR(m.fechaNacimiento, 'YYYY-MM-DD') AS fechaNacimiento,
+                CASE
+                    WHEN m.fechaNacimiento IS NULL THEN NULL
+                    ELSE FLOOR(MONTHS_BETWEEN(SYSDATE, m.fechaNacimiento) / 12)
+                END AS edad,
+                m.sexo AS sexo,
+                m.peso AS peso,
+                m.especie AS especie,
+                m.raza AS raza,
+                c.nombreCompleto AS clienteNombre,
+                es.estadoSalud AS estadoSalud
+            FROM MASCOTA m
+            JOIN CLIENTE c ON c.idCliente = m.idCliente
+            LEFT JOIN (
+                SELECT
+                    codigoMascota,
+                    estadoSalud,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY codigoMascota
+                        ORDER BY fechaRegistro DESC, idEstadoSalud DESC
+                    ) AS rn
+                FROM ESTADO_SALUD_MASCOTA
+            ) es ON es.codigoMascota = m.codigoMascota
+                 AND es.rn = 1
+            ORDER BY m.nombre;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'MASCOTA',
+                'LISTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_mascotas;
+
+
+    PROCEDURE pr_obtener_mascota(
+        p_codigoMascota IN MASCOTA.codigoMascota%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(m.codigoMascota) AS id,
+                TRIM(m.idCliente) AS clienteId,
+                m.nombre AS nombre,
+                TO_CHAR(m.fechaNacimiento, 'YYYY-MM-DD') AS fechaNacimiento,
+                CASE
+                    WHEN m.fechaNacimiento IS NULL THEN NULL
+                    ELSE FLOOR(MONTHS_BETWEEN(SYSDATE, m.fechaNacimiento) / 12)
+                END AS edad,
+                m.sexo AS sexo,
+                m.peso AS peso,
+                m.especie AS especie,
+                m.raza AS raza,
+                c.nombreCompleto AS clienteNombre,
+                es.estadoSalud AS estadoSalud
+            FROM MASCOTA m
+            JOIN CLIENTE c ON c.idCliente = m.idCliente
+            LEFT JOIN (
+                SELECT
+                    codigoMascota,
+                    estadoSalud,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY codigoMascota
+                        ORDER BY fechaRegistro DESC, idEstadoSalud DESC
+                    ) AS rn
+                FROM ESTADO_SALUD_MASCOTA
+            ) es ON es.codigoMascota = m.codigoMascota
+                 AND es.rn = 1
+            WHERE TRIM(UPPER(m.codigoMascota)) = TRIM(UPPER(p_codigoMascota));
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'MASCOTA',
+                'OBTENER',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_obtener_mascota;
     PROCEDURE pr_insertar_mascota(p_codigoMascota IN MASCOTA.codigoMascota%TYPE, p_idCliente IN MASCOTA.idCliente%TYPE,
         p_nombre IN MASCOTA.nombre%TYPE, p_fechaNacimiento IN MASCOTA.fechaNacimiento%TYPE, p_sexo IN MASCOTA.sexo%TYPE,
         p_peso IN MASCOTA.peso%TYPE, p_especie IN MASCOTA.especie%TYPE, p_raza IN MASCOTA.raza%TYPE,
@@ -917,6 +1177,14 @@ END PKG_CONSULTAS_MEDICAS;
 -- 6. PKG_INVENTARIO_MEDICO
 -- ============================================================
 CREATE OR REPLACE PACKAGE PKG_INVENTARIO_MEDICO AS
+    PROCEDURE pr_listar_medicamentos(
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_obtener_medicamento(
+        p_idMedicamento IN MEDICAMENTO.idMedicamento%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    );
     PROCEDURE pr_insertar_medicamento(p_idMedicamento IN MEDICAMENTO.idMedicamento%TYPE, p_nombre IN MEDICAMENTO.nombre%TYPE,
         p_descripcion IN MEDICAMENTO.descripcion%TYPE, p_precioUnitario IN MEDICAMENTO.precioUnitario%TYPE,
         p_idMed_out OUT MEDICAMENTO.idMedicamento%TYPE);
@@ -935,6 +1203,59 @@ END PKG_INVENTARIO_MEDICO;
 /
 
 CREATE OR REPLACE PACKAGE BODY PKG_INVENTARIO_MEDICO AS
+    PROCEDURE pr_listar_medicamentos(
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(idMedicamento) AS id,
+                nombre,
+                descripcion,
+                precioUnitario
+            FROM MEDICAMENTO
+            ORDER BY nombre;
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'MEDICAMENTO',
+                'LISTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_medicamentos;
+
+
+    PROCEDURE pr_obtener_medicamento(
+        p_idMedicamento IN MEDICAMENTO.idMedicamento%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(idMedicamento) AS id,
+                nombre,
+                descripcion,
+                precioUnitario
+            FROM MEDICAMENTO
+            WHERE TRIM(UPPER(idMedicamento)) = TRIM(UPPER(p_idMedicamento));
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'MEDICAMENTO',
+                'OBTENER',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_obtener_medicamento;
     PROCEDURE pr_insertar_medicamento(p_idMedicamento IN MEDICAMENTO.idMedicamento%TYPE, p_nombre IN MEDICAMENTO.nombre%TYPE,
         p_descripcion IN MEDICAMENTO.descripcion%TYPE, p_precioUnitario IN MEDICAMENTO.precioUnitario%TYPE,
         p_idMed_out OUT MEDICAMENTO.idMedicamento%TYPE) IS
@@ -1016,36 +1337,228 @@ END PKG_VACUNACION;
 -- 8. PKG_SERVICIOS
 -- ============================================================
 CREATE OR REPLACE PACKAGE PKG_SERVICIOS AS
-    PROCEDURE pr_insertar_servicio(p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
-        p_nombre IN CATALOGO_SERVICIOS.nombre%TYPE, p_tipoServicio IN CATALOGO_SERVICIOS.tipoServicio%TYPE,
-        p_precio IN CATALOGO_SERVICIOS.precio%TYPE, p_descripcion IN CATALOGO_SERVICIOS.descripcion%TYPE,
-        p_activo IN CATALOGO_SERVICIOS.activo%TYPE DEFAULT 'S', p_idServ_out OUT CATALOGO_SERVICIOS.idServicio%TYPE);
-    PROCEDURE pr_modificar_servicio(p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
-        p_nombre IN CATALOGO_SERVICIOS.nombre%TYPE, p_tipoServicio IN CATALOGO_SERVICIOS.tipoServicio%TYPE,
-        p_precio IN CATALOGO_SERVICIOS.precio%TYPE, p_descripcion IN CATALOGO_SERVICIOS.descripcion%TYPE,
-        p_activo IN CATALOGO_SERVICIOS.activo%TYPE, p_filas_afectadas OUT NUMBER);
-    PROCEDURE pr_eliminar_servicio(p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE, p_filas_afectadas OUT NUMBER);
+
+    PROCEDURE pr_listar_servicios(
+        p_soloActivos IN NUMBER,
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_obtener_servicio(
+        p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_insertar_servicio(
+        p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
+        p_nombre IN CATALOGO_SERVICIOS.nombre%TYPE,
+        p_tipoServicio IN CATALOGO_SERVICIOS.tipoServicio%TYPE,
+        p_precio IN CATALOGO_SERVICIOS.precio%TYPE,
+        p_descripcion IN CATALOGO_SERVICIOS.descripcion%TYPE,
+        p_activo IN CATALOGO_SERVICIOS.activo%TYPE,
+        p_idServ_out OUT CATALOGO_SERVICIOS.idServicio%TYPE
+    );
+
+    PROCEDURE pr_modificar_servicio(
+        p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
+        p_nombre IN CATALOGO_SERVICIOS.nombre%TYPE,
+        p_tipoServicio IN CATALOGO_SERVICIOS.tipoServicio%TYPE,
+        p_precio IN CATALOGO_SERVICIOS.precio%TYPE,
+        p_descripcion IN CATALOGO_SERVICIOS.descripcion%TYPE,
+        p_activo IN CATALOGO_SERVICIOS.activo%TYPE,
+        p_filas_afectadas OUT NUMBER
+    );
+
+    PROCEDURE pr_eliminar_servicio(
+        p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
+        p_filas_afectadas OUT NUMBER
+    );
+
 END PKG_SERVICIOS;
 /
 
 CREATE OR REPLACE PACKAGE BODY PKG_SERVICIOS AS
-    PROCEDURE pr_insertar_servicio(p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
-        p_nombre IN CATALOGO_SERVICIOS.nombre%TYPE, p_tipoServicio IN CATALOGO_SERVICIOS.tipoServicio%TYPE,
-        p_precio IN CATALOGO_SERVICIOS.precio%TYPE, p_descripcion IN CATALOGO_SERVICIOS.descripcion%TYPE,
-        p_activo IN CATALOGO_SERVICIOS.activo%TYPE DEFAULT 'S', p_idServ_out OUT CATALOGO_SERVICIOS.idServicio%TYPE) IS
-    BEGIN INSERT INTO CATALOGO_SERVICIOS (idServicio,nombre,tipoServicio,precio,descripcion,activo) VALUES (p_idServicio,p_nombre,p_tipoServicio,p_precio,p_descripcion,p_activo) RETURNING idServicio INTO p_idServ_out;
-    EXCEPTION WHEN OTHERS THEN PKG_UTILIDADES.manejar('CATALOGO_SERVICIOS','INSERTAR',SQLCODE,SQLERRM); END;
-    PROCEDURE pr_modificar_servicio(p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
-        p_nombre IN CATALOGO_SERVICIOS.nombre%TYPE, p_tipoServicio IN CATALOGO_SERVICIOS.tipoServicio%TYPE,
-        p_precio IN CATALOGO_SERVICIOS.precio%TYPE, p_descripcion IN CATALOGO_SERVICIOS.descripcion%TYPE,
-        p_activo IN CATALOGO_SERVICIOS.activo%TYPE, p_filas_afectadas OUT NUMBER) IS
-    BEGIN UPDATE CATALOGO_SERVICIOS SET nombre=p_nombre,tipoServicio=p_tipoServicio,precio=p_precio,descripcion=p_descripcion,activo=p_activo WHERE idServicio=p_idServicio; p_filas_afectadas:=SQL%ROWCOUNT; IF p_filas_afectadas=0 THEN PKG_UTILIDADES.lanzar_no_encontrado('CATALOGO_SERVICIOS',p_idServicio); END IF;
-    EXCEPTION WHEN OTHERS THEN IF SQLCODE BETWEEN -20999 AND -20000 THEN RAISE; END IF; PKG_UTILIDADES.manejar('CATALOGO_SERVICIOS','MODIFICAR',SQLCODE,SQLERRM); END;
-    PROCEDURE pr_eliminar_servicio(p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE, p_filas_afectadas OUT NUMBER) IS
-    BEGIN DELETE FROM CATALOGO_SERVICIOS WHERE idServicio=p_idServicio; p_filas_afectadas:=SQL%ROWCOUNT; IF p_filas_afectadas=0 THEN PKG_UTILIDADES.lanzar_no_encontrado('CATALOGO_SERVICIOS',p_idServicio); END IF;
-    EXCEPTION WHEN OTHERS THEN IF SQLCODE BETWEEN -20999 AND -20000 THEN RAISE; END IF; PKG_UTILIDADES.manejar('CATALOGO_SERVICIOS','ELIMINAR',SQLCODE,SQLERRM); END;
+
+    PROCEDURE pr_listar_servicios(
+        p_soloActivos IN NUMBER,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(idServicio) AS id,
+                nombre,
+                tipoServicio,
+                precio,
+                descripcion,
+                activo
+            FROM CATALOGO_SERVICIOS
+            WHERE (NVL(p_soloActivos, 0) = 0 OR activo = 'S')
+            ORDER BY nombre;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'CATALOGO_SERVICIOS',
+                'LISTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_servicios;
+
+
+    PROCEDURE pr_obtener_servicio(
+        p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(idServicio) AS id,
+                nombre,
+                tipoServicio,
+                precio,
+                descripcion,
+                activo
+            FROM CATALOGO_SERVICIOS
+            WHERE TRIM(UPPER(idServicio)) = TRIM(UPPER(p_idServicio));
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'CATALOGO_SERVICIOS',
+                'OBTENER',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_obtener_servicio;
+
+
+    PROCEDURE pr_insertar_servicio(
+        p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
+        p_nombre IN CATALOGO_SERVICIOS.nombre%TYPE,
+        p_tipoServicio IN CATALOGO_SERVICIOS.tipoServicio%TYPE,
+        p_precio IN CATALOGO_SERVICIOS.precio%TYPE,
+        p_descripcion IN CATALOGO_SERVICIOS.descripcion%TYPE,
+        p_activo IN CATALOGO_SERVICIOS.activo%TYPE,
+        p_idServ_out OUT CATALOGO_SERVICIOS.idServicio%TYPE
+    ) IS
+    BEGIN
+        INSERT INTO CATALOGO_SERVICIOS (
+            idServicio,
+            nombre,
+            tipoServicio,
+            precio,
+            descripcion,
+            activo
+        ) VALUES (
+            p_idServicio,
+            p_nombre,
+            p_tipoServicio,
+            p_precio,
+            p_descripcion,
+            NVL(p_activo, 'S')
+        )
+        RETURNING idServicio INTO p_idServ_out;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'CATALOGO_SERVICIOS',
+                'INSERTAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_insertar_servicio;
+
+
+    PROCEDURE pr_modificar_servicio(
+        p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
+        p_nombre IN CATALOGO_SERVICIOS.nombre%TYPE,
+        p_tipoServicio IN CATALOGO_SERVICIOS.tipoServicio%TYPE,
+        p_precio IN CATALOGO_SERVICIOS.precio%TYPE,
+        p_descripcion IN CATALOGO_SERVICIOS.descripcion%TYPE,
+        p_activo IN CATALOGO_SERVICIOS.activo%TYPE,
+        p_filas_afectadas OUT NUMBER
+    ) IS
+    BEGIN
+        UPDATE CATALOGO_SERVICIOS
+        SET nombre = p_nombre,
+            tipoServicio = p_tipoServicio,
+            precio = p_precio,
+            descripcion = p_descripcion,
+            activo = p_activo
+        WHERE TRIM(UPPER(idServicio)) = TRIM(UPPER(p_idServicio));
+
+        p_filas_afectadas := SQL%ROWCOUNT;
+
+        IF p_filas_afectadas = 0 THEN
+            PKG_UTILIDADES.lanzar_no_encontrado(
+                'CATALOGO_SERVICIOS',
+                p_idServicio
+            );
+        END IF;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'CATALOGO_SERVICIOS',
+                'MODIFICAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_modificar_servicio;
+
+
+    PROCEDURE pr_eliminar_servicio(
+        p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
+        p_filas_afectadas OUT NUMBER
+    ) IS
+    BEGIN
+        DELETE FROM CATALOGO_SERVICIOS
+        WHERE TRIM(UPPER(idServicio)) = TRIM(UPPER(p_idServicio));
+
+        p_filas_afectadas := SQL%ROWCOUNT;
+
+        IF p_filas_afectadas = 0 THEN
+            PKG_UTILIDADES.lanzar_no_encontrado(
+                'CATALOGO_SERVICIOS',
+                p_idServicio
+            );
+        END IF;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLCODE BETWEEN -20999 AND -20000 THEN
+                RAISE;
+            END IF;
+
+            PKG_UTILIDADES.manejar(
+                'CATALOGO_SERVICIOS',
+                'ELIMINAR',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_eliminar_servicio;
+
 END PKG_SERVICIOS;
 /
+
 
 -- ============================================================
 -- 9. PKG_FACTURACION

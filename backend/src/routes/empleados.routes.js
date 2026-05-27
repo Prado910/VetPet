@@ -2,6 +2,15 @@ const express = require("express");
 const router = express.Router();
 const { getConnection } = require("../db");
 
+const {
+    cursorToRows,
+    outCursor,
+    outNumber,
+    outString,
+    normalizarTexto,
+    normalizarId,
+} = require("../plsql");
+
 const tiposEmpleadoValidos = ["VETERINARIO", "RECEPCIONISTA"];
 const estadosLaboralesValidos = ["ACTIVO", "INACTIVO", "SUSPENDIDO"];
 const turnosValidos = ["DIURNO", "NOCTURNO"];
@@ -71,6 +80,13 @@ function manejarErrorOracle(error, res, mensajeBase) {
         });
     }
 
+    if (error.errorNum === 20001 || error.errorNum === 20999) {
+        return res.status(404).json({
+            message: "Empleado no encontrado",
+            error: error.message,
+        });
+    }
+
     if (error.errorNum === 2291) {
         return res.status(400).json({
             message: "El registro relacionado seleccionado no existe.",
@@ -106,29 +122,185 @@ function manejarErrorOracle(error, res, mensajeBase) {
     });
 }
 
+async function obtenerEmpleado(connection, id) {
+    const result = await connection.execute(
+        `
+        BEGIN
+            PKG_PERSONAL.pr_obtener_empleado(
+                :p_idEmpleado,
+                :p_cursor
+            );
+        END;
+        `,
+        {
+            p_idEmpleado: id,
+            p_cursor: outCursor(),
+        }
+    );
+
+    const rows = await cursorToRows(result.outBinds.p_cursor);
+    return rows[0] || null;
+}
+
+async function insertarSubtipoEmpleado(connection, empleado) {
+    const {
+        id,
+        tipoEmpleado,
+        especialidad = null,
+        nroMatricula = null,
+        turno = null,
+    } = empleado;
+
+    if (tipoEmpleado === "VETERINARIO") {
+        await connection.execute(
+            `
+            BEGIN
+                PKG_PERSONAL.pr_insertar_veterinario(
+                    :p_idEmpleado,
+                    :p_especialidad,
+                    :p_nroMatricula,
+                    :p_idEmpleado_out
+                );
+            END;
+            `,
+            {
+                p_idEmpleado: id,
+                p_especialidad: normalizarTexto(especialidad),
+                p_nroMatricula: normalizarTexto(nroMatricula),
+                p_idEmpleado_out: outString(30),
+            }
+        );
+    }
+
+    if (tipoEmpleado === "RECEPCIONISTA") {
+        await connection.execute(
+            `
+            BEGIN
+                PKG_PERSONAL.pr_insertar_recepcionista(
+                    :p_idEmpleado,
+                    :p_turno,
+                    :p_idEmpleado_out
+                );
+            END;
+            `,
+            {
+                p_idEmpleado: id,
+                p_turno: turno,
+                p_idEmpleado_out: outString(30),
+            }
+        );
+    }
+}
+
+async function modificarSubtipoEmpleado(connection, empleado) {
+    const {
+        id,
+        tipoEmpleado,
+        especialidad = null,
+        nroMatricula = null,
+        turno = null,
+    } = empleado;
+
+    if (tipoEmpleado === "VETERINARIO") {
+        await connection.execute(
+            `
+            BEGIN
+                PKG_PERSONAL.pr_modificar_veterinario(
+                    :p_idEmpleado,
+                    :p_especialidad,
+                    :p_nroMatricula,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
+            {
+                p_idEmpleado: id,
+                p_especialidad: normalizarTexto(especialidad),
+                p_nroMatricula: normalizarTexto(nroMatricula),
+                p_filas_afectadas: outNumber(),
+            }
+        );
+    }
+
+    if (tipoEmpleado === "RECEPCIONISTA") {
+        await connection.execute(
+            `
+            BEGIN
+                PKG_PERSONAL.pr_modificar_recepcionista(
+                    :p_idEmpleado,
+                    :p_turno,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
+            {
+                p_idEmpleado: id,
+                p_turno: turno,
+                p_filas_afectadas: outNumber(),
+            }
+        );
+    }
+}
+
+async function eliminarSubtipoEmpleado(connection, id, tipoEmpleado) {
+    if (tipoEmpleado === "VETERINARIO") {
+        await connection.execute(
+            `
+            BEGIN
+                PKG_PERSONAL.pr_eliminar_veterinario(
+                    :p_idEmpleado,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
+            {
+                p_idEmpleado: id,
+                p_filas_afectadas: outNumber(),
+            }
+        );
+    }
+
+    if (tipoEmpleado === "RECEPCIONISTA") {
+        await connection.execute(
+            `
+            BEGIN
+                PKG_PERSONAL.pr_eliminar_recepcionista(
+                    :p_idEmpleado,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
+            {
+                p_idEmpleado: id,
+                p_filas_afectadas: outNumber(),
+            }
+        );
+    }
+}
+
 router.get("/veterinarios", async (req, res) => {
     let connection;
 
     try {
         connection = await getConnection();
 
-        const result = await connection.execute(`
-      SELECT
-        TRIM(v.idEmpleado) AS "id",
-        e.nombreCompleto AS "nombre",
-        e.telefono AS "telefono",
-        TO_CHAR(e.fechaIngreso, 'YYYY-MM-DD') AS "fechaIngreso",
-        e.estadoLaboral AS "estadoLaboral",
-        e.salario AS "salario",
-        v.especialidad AS "especialidad",
-        v.nroMatricula AS "nroMatricula"
-      FROM VETERINARIO v
-      JOIN EMPLEADO e ON e.idEmpleado = v.idEmpleado
-      WHERE e.estadoLaboral = 'ACTIVO'
-      ORDER BY e.nombreCompleto
-    `);
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_PERSONAL.pr_listar_veterinarios(
+                    :p_soloActivos,
+                    :p_cursor
+                );
+            END;
+            `,
+            {
+                p_soloActivos: 1,
+                p_cursor: outCursor(),
+            }
+        );
 
-        res.json(result.rows);
+        const rows = await cursorToRows(result.outBinds.p_cursor);
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando veterinarios");
     } finally {
@@ -142,22 +314,23 @@ router.get("/recepcionistas", async (req, res) => {
     try {
         connection = await getConnection();
 
-        const result = await connection.execute(`
-      SELECT
-        TRIM(r.idEmpleado) AS "id",
-        e.nombreCompleto AS "nombre",
-        e.telefono AS "telefono",
-        TO_CHAR(e.fechaIngreso, 'YYYY-MM-DD') AS "fechaIngreso",
-        e.estadoLaboral AS "estadoLaboral",
-        e.salario AS "salario",
-        r.turno AS "turno"
-      FROM RECEPCIONISTA r
-      JOIN EMPLEADO e ON e.idEmpleado = r.idEmpleado
-      WHERE e.estadoLaboral = 'ACTIVO'
-      ORDER BY e.nombreCompleto
-    `);
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_PERSONAL.pr_listar_recepcionistas(
+                    :p_soloActivos,
+                    :p_cursor
+                );
+            END;
+            `,
+            {
+                p_soloActivos: 1,
+                p_cursor: outCursor(),
+            }
+        );
 
-        res.json(result.rows);
+        const rows = await cursorToRows(result.outBinds.p_cursor);
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando recepcionistas");
     } finally {
@@ -171,27 +344,45 @@ router.get("/", async (req, res) => {
     try {
         connection = await getConnection();
 
-        const result = await connection.execute(`
-      SELECT
-        TRIM(e.idEmpleado) AS "id",
-        e.nombreCompleto AS "nombre",
-        e.telefono AS "telefono",
-        TO_CHAR(e.fechaIngreso, 'YYYY-MM-DD') AS "fechaIngreso",
-        e.estadoLaboral AS "estadoLaboral",
-        e.tipoEmpleado AS "tipoEmpleado",
-        e.salario AS "salario",
-        v.especialidad AS "especialidad",
-        v.nroMatricula AS "nroMatricula",
-        r.turno AS "turno"
-      FROM EMPLEADO e
-      LEFT JOIN VETERINARIO v ON v.idEmpleado = e.idEmpleado
-      LEFT JOIN RECEPCIONISTA r ON r.idEmpleado = e.idEmpleado
-      ORDER BY e.nombreCompleto
-    `);
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_PERSONAL.pr_listar_empleados(:p_cursor);
+            END;
+            `,
+            {
+                p_cursor: outCursor(),
+            }
+        );
 
-        res.json(result.rows);
+        const rows = await cursorToRows(result.outBinds.p_cursor);
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando empleados");
+    } finally {
+        if (connection) await connection.close();
+    }
+});
+
+router.get("/:id", async (req, res) => {
+    let connection;
+
+    const id = normalizarId(req.params.id);
+
+    try {
+        connection = await getConnection();
+
+        const empleado = await obtenerEmpleado(connection, id);
+
+        if (!empleado) {
+            return res.status(404).json({
+                message: "Empleado no encontrado",
+            });
+        }
+
+        res.json(empleado);
+    } catch (error) {
+        manejarErrorOracle(error, res, "Error consultando empleado");
     } finally {
         if (connection) await connection.close();
     }
@@ -225,68 +416,50 @@ router.post("/", async (req, res) => {
     try {
         connection = await getConnection();
 
+        const idEmpleado = normalizarId(id);
+
         await connection.execute(
             `
-      INSERT INTO EMPLEADO (
-        idEmpleado,
-        nombreCompleto,
-        telefono,
-        fechaIngreso,
-        estadoLaboral,
-        tipoEmpleado,
-        salario
-      ) VALUES (
-        :id,
-        :nombre,
-        :telefono,
-        TO_DATE(:fechaIngreso, 'YYYY-MM-DD'),
-        :estadoLaboral,
-        :tipoEmpleado,
-        :salario
-      )
-      `,
+            BEGIN
+                PKG_PERSONAL.pr_insertar_empleado(
+                    :p_idEmpleado,
+                    :p_nombreCompleto,
+                    :p_telefono,
+                    TO_DATE(:p_fechaIngreso, 'YYYY-MM-DD'),
+                    :p_estadoLaboral,
+                    :p_tipoEmpleado,
+                    :p_salario,
+                    :p_idEmpleado_out
+                );
+            END;
+            `,
             {
-                id: id.trim(),
-                nombre: nombre.trim(),
-                telefono: telefono?.trim() || null,
-                fechaIngreso,
-                estadoLaboral,
-                tipoEmpleado,
-                salario: Number(salario),
+                p_idEmpleado: idEmpleado,
+                p_nombreCompleto: nombre.trim(),
+                p_telefono: normalizarTexto(telefono),
+                p_fechaIngreso: fechaIngreso,
+                p_estadoLaboral: estadoLaboral,
+                p_tipoEmpleado: tipoEmpleado,
+                p_salario: Number(salario),
+                p_idEmpleado_out: outString(30),
             }
         );
 
-        if (tipoEmpleado === "VETERINARIO") {
-            await connection.execute(
-                `
-        INSERT INTO VETERINARIO (idEmpleado, especialidad, nroMatricula)
-        VALUES (:id, :especialidad, :nroMatricula)
-        `,
-                {
-                    id: id.trim(),
-                    especialidad: especialidad?.trim() || null,
-                    nroMatricula: nroMatricula?.trim() || null,
-                }
-            );
-        }
-
-        if (tipoEmpleado === "RECEPCIONISTA") {
-            await connection.execute(
-                `
-        INSERT INTO RECEPCIONISTA (idEmpleado, turno)
-        VALUES (:id, :turno)
-        `,
-                {
-                    id: id.trim(),
-                    turno,
-                }
-            );
-        }
+        await insertarSubtipoEmpleado(connection, {
+            id: idEmpleado,
+            tipoEmpleado,
+            especialidad,
+            nroMatricula,
+            turno,
+        });
 
         await connection.commit();
 
         res.status(201).json({
+            ok: true,
+            action: "CREATED",
             message: "Empleado creado correctamente",
+            id: idEmpleado,
         });
     } catch (error) {
         if (connection) await connection.rollback();
@@ -299,7 +472,8 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
     let connection;
 
-    const id = req.params.id;
+    const id = normalizarId(req.params.id);
+
     const {
         nombre,
         telefono = null,
@@ -324,124 +498,71 @@ router.put("/:id", async (req, res) => {
     try {
         connection = await getConnection();
 
-        const empleadoActual = await connection.execute(
-            `
-      SELECT tipoEmpleado AS "tipoEmpleado"
-      FROM EMPLEADO
-      WHERE idEmpleado = :id
-      `,
-            { id }
-        );
+        const empleadoActual = await obtenerEmpleado(connection, id);
 
-        if (empleadoActual.rows.length === 0) {
-            return res.status(404).json({ message: "Empleado no encontrado" });
+        if (!empleadoActual) {
+            return res.status(404).json({
+                message: "Empleado no encontrado",
+            });
         }
 
-        const tipoAnterior = empleadoActual.rows[0].tipoEmpleado;
+        const tipoAnterior =
+            empleadoActual.tipoEmpleado || empleadoActual.TIPOEMPLEADO;
 
-        const result = await connection.execute(
+        await connection.execute(
             `
-      UPDATE EMPLEADO
-      SET
-        nombreCompleto = :nombre,
-        telefono = :telefono,
-        fechaIngreso = TO_DATE(:fechaIngreso, 'YYYY-MM-DD'),
-        estadoLaboral = :estadoLaboral,
-        tipoEmpleado = :tipoEmpleado,
-        salario = :salario
-      WHERE idEmpleado = :id
-      `,
+            BEGIN
+                PKG_PERSONAL.pr_modificar_empleado(
+                    :p_idEmpleado,
+                    :p_nombreCompleto,
+                    :p_telefono,
+                    TO_DATE(:p_fechaIngreso, 'YYYY-MM-DD'),
+                    :p_estadoLaboral,
+                    :p_tipoEmpleado,
+                    :p_salario,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
             {
-                id,
-                nombre: nombre.trim(),
-                telefono: telefono?.trim() || null,
-                fechaIngreso,
-                estadoLaboral,
-                tipoEmpleado,
-                salario: Number(salario),
+                p_idEmpleado: id,
+                p_nombreCompleto: nombre.trim(),
+                p_telefono: normalizarTexto(telefono),
+                p_fechaIngreso: fechaIngreso,
+                p_estadoLaboral: estadoLaboral,
+                p_tipoEmpleado: tipoEmpleado,
+                p_salario: Number(salario),
+                p_filas_afectadas: outNumber(),
             }
         );
-
-        if (result.rowsAffected === 0) {
-            await connection.rollback();
-            return res.status(404).json({ message: "Empleado no encontrado" });
-        }
 
         if (tipoAnterior !== tipoEmpleado) {
-            if (tipoAnterior === "VETERINARIO") {
-                await connection.execute(`DELETE FROM VETERINARIO WHERE idEmpleado = :id`, { id });
-            }
+            await eliminarSubtipoEmpleado(connection, id, tipoAnterior);
 
-            if (tipoAnterior === "RECEPCIONISTA") {
-                await connection.execute(`DELETE FROM RECEPCIONISTA WHERE idEmpleado = :id`, { id });
-            }
-
-            if (tipoEmpleado === "VETERINARIO") {
-                await connection.execute(
-                    `
-          INSERT INTO VETERINARIO (idEmpleado, especialidad, nroMatricula)
-          VALUES (:id, :especialidad, :nroMatricula)
-          `,
-                    {
-                        id,
-                        especialidad: especialidad?.trim() || null,
-                        nroMatricula: nroMatricula?.trim() || null,
-                    }
-                );
-            }
-
-            if (tipoEmpleado === "RECEPCIONISTA") {
-                await connection.execute(
-                    `
-          INSERT INTO RECEPCIONISTA (idEmpleado, turno)
-          VALUES (:id, :turno)
-          `,
-                    { id, turno }
-                );
-            }
-        } else if (tipoEmpleado === "VETERINARIO") {
-            await connection.execute(
-                `
-        MERGE INTO VETERINARIO v
-        USING (
-          SELECT :id AS idEmpleado, :especialidad AS especialidad, :nroMatricula AS nroMatricula
-          FROM dual
-        ) src
-        ON (v.idEmpleado = src.idEmpleado)
-        WHEN MATCHED THEN UPDATE SET
-          v.especialidad = src.especialidad,
-          v.nroMatricula = src.nroMatricula
-        WHEN NOT MATCHED THEN INSERT (idEmpleado, especialidad, nroMatricula)
-          VALUES (src.idEmpleado, src.especialidad, src.nroMatricula)
-        `,
-                {
-                    id,
-                    especialidad: especialidad?.trim() || null,
-                    nroMatricula: nroMatricula?.trim() || null,
-                }
-            );
-        } else if (tipoEmpleado === "RECEPCIONISTA") {
-            await connection.execute(
-                `
-        MERGE INTO RECEPCIONISTA r
-        USING (
-          SELECT :id AS idEmpleado, :turno AS turno
-          FROM dual
-        ) src
-        ON (r.idEmpleado = src.idEmpleado)
-        WHEN MATCHED THEN UPDATE SET
-          r.turno = src.turno
-        WHEN NOT MATCHED THEN INSERT (idEmpleado, turno)
-          VALUES (src.idEmpleado, src.turno)
-        `,
-                { id, turno }
-            );
+            await insertarSubtipoEmpleado(connection, {
+                id,
+                tipoEmpleado,
+                especialidad,
+                nroMatricula,
+                turno,
+            });
+        } else {
+            await modificarSubtipoEmpleado(connection, {
+                id,
+                tipoEmpleado,
+                especialidad,
+                nroMatricula,
+                turno,
+            });
         }
 
         await connection.commit();
 
         res.json({
+            ok: true,
+            action: "UPDATED",
             message: "Empleado actualizado correctamente",
+            id,
         });
     } catch (error) {
         if (connection) await connection.rollback();
@@ -454,30 +575,50 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
     let connection;
 
-    const id = req.params.id;
+    const id = normalizarId(req.params.id);
 
     try {
         connection = await getConnection();
 
-        const result = await connection.execute(
-            `
-      DELETE FROM EMPLEADO
-      WHERE idEmpleado = :id
-      `,
-            { id },
-            { autoCommit: true }
-        );
+        const empleadoActual = await obtenerEmpleado(connection, id);
 
-        if (result.rowsAffected === 0) {
+        if (!empleadoActual) {
             return res.status(404).json({
                 message: "Empleado no encontrado",
             });
         }
 
+        const tipoEmpleado =
+            empleadoActual.tipoEmpleado || empleadoActual.TIPOEMPLEADO;
+
+        await eliminarSubtipoEmpleado(connection, id, tipoEmpleado);
+
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_PERSONAL.pr_eliminar_empleado(
+                    :p_idEmpleado,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
+            {
+                p_idEmpleado: id,
+                p_filas_afectadas: outNumber(),
+            }
+        );
+
+        await connection.commit();
+
         res.json({
+            ok: true,
+            action: "DELETED",
             message: "Empleado eliminado correctamente",
+            id,
+            filasAfectadas: result.outBinds.p_filas_afectadas,
         });
     } catch (error) {
+        if (connection) await connection.rollback();
         manejarErrorOracle(error, res, "Error eliminando empleado");
     } finally {
         if (connection) await connection.close();
