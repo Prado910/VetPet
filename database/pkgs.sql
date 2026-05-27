@@ -944,19 +944,98 @@ END PKG_VACUNACION;
 -- 8. PKG_SERVICIOS
 -- ============================================================
 CREATE OR REPLACE PACKAGE PKG_SERVICIOS AS
-    PROCEDURE pr_insertar_servicio(p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
-        p_nombre IN CATALOGO_SERVICIOS.nombre%TYPE, p_tipoServicio IN CATALOGO_SERVICIOS.tipoServicio%TYPE,
-        p_precio IN CATALOGO_SERVICIOS.precio%TYPE, p_descripcion IN CATALOGO_SERVICIOS.descripcion%TYPE,
-        p_activo IN CATALOGO_SERVICIOS.activo%TYPE DEFAULT 'S', p_idServ_out OUT CATALOGO_SERVICIOS.idServicio%TYPE);
-    PROCEDURE pr_modificar_servicio(p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
-        p_nombre IN CATALOGO_SERVICIOS.nombre%TYPE, p_tipoServicio IN CATALOGO_SERVICIOS.tipoServicio%TYPE,
-        p_precio IN CATALOGO_SERVICIOS.precio%TYPE, p_descripcion IN CATALOGO_SERVICIOS.descripcion%TYPE,
-        p_activo IN CATALOGO_SERVICIOS.activo%TYPE, p_filas_afectadas OUT NUMBER);
-    PROCEDURE pr_eliminar_servicio(p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE, p_filas_afectadas OUT NUMBER);
+
+    PROCEDURE pr_listar_servicios(
+        p_soloActivos IN NUMBER DEFAULT 0,
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_obtener_servicio(
+        p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE pr_insertar_servicio(
+        p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
+        p_nombre IN CATALOGO_SERVICIOS.nombre%TYPE,
+        p_tipoServicio IN CATALOGO_SERVICIOS.tipoServicio%TYPE,
+        p_precio IN CATALOGO_SERVICIOS.precio%TYPE,
+        p_descripcion IN CATALOGO_SERVICIOS.descripcion%TYPE,
+        p_activo IN CATALOGO_SERVICIOS.activo%TYPE,
+        p_idServ_out OUT CATALOGO_SERVICIOS.idServicio%TYPE
+    );
+
+    PROCEDURE pr_modificar_servicio(
+        p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
+        p_nombre IN CATALOGO_SERVICIOS.nombre%TYPE,
+        p_tipoServicio IN CATALOGO_SERVICIOS.tipoServicio%TYPE,
+        p_precio IN CATALOGO_SERVICIOS.precio%TYPE,
+        p_descripcion IN CATALOGO_SERVICIOS.descripcion%TYPE,
+        p_activo IN CATALOGO_SERVICIOS.activo%TYPE,
+        p_filas_afectadas OUT NUMBER
+    );
+
+    PROCEDURE pr_eliminar_servicio(
+        p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
+        p_filas_afectadas OUT NUMBER
+    );
+
 END PKG_SERVICIOS;
+/
 /
 
 CREATE OR REPLACE PACKAGE BODY PKG_SERVICIOS AS
+    PROCEDURE pr_listar_servicios(
+        p_soloActivos IN NUMBER DEFAULT 0,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(idServicio) AS id,
+                nombre,
+                tipoServicio,
+                precio,
+                descripcion,
+                activo
+            FROM CATALOGO_SERVICIOS
+            WHERE (p_soloActivos = 0 OR activo = 'S')
+            ORDER BY nombre;
+    EXCEPTION
+        WHEN OTHERS THEN
+            PKG_UTILIDADES.manejar(
+                'CATALOGO_SERVICIOS',
+                'LISTAR SERVICIOS',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_listar_servicios;
+
+
+    PROCEDURE pr_obtener_servicio(
+        p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
+        p_cursor OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+        OPEN p_cursor FOR
+            SELECT
+                TRIM(idServicio) AS id,
+                nombre,
+                tipoServicio,
+                precio,
+                descripcion,
+                activo
+            FROM CATALOGO_SERVICIOS
+            WHERE TRIM(UPPER(idServicio)) = TRIM(UPPER(p_idServicio));
+    EXCEPTION
+        WHEN OTHERS THEN
+            PKG_UTILIDADES.manejar(
+                'CATALOGO_SERVICIOS',
+                'OBTENER SERVICIO',
+                SQLCODE,
+                SQLERRM
+            );
+    END pr_obtener_servicio;
     PROCEDURE pr_insertar_servicio(p_idServicio IN CATALOGO_SERVICIOS.idServicio%TYPE,
         p_nombre IN CATALOGO_SERVICIOS.nombre%TYPE, p_tipoServicio IN CATALOGO_SERVICIOS.tipoServicio%TYPE,
         p_precio IN CATALOGO_SERVICIOS.precio%TYPE, p_descripcion IN CATALOGO_SERVICIOS.descripcion%TYPE,

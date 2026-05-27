@@ -2,6 +2,15 @@ const express = require("express");
 const router = express.Router();
 const { getConnection } = require("../db");
 
+const {
+    cursorToRows,
+    outCursor,
+    outNumber,
+    outString,
+    normalizarTexto,
+    normalizarId,
+} = require("../plsql");
+
 const tiposServicioValidos = [
     "CONSULTA",
     "PROCEDIMIENTO",
@@ -33,7 +42,7 @@ function validarServicio(
         return "El precio del servicio es obligatorio.";
     }
 
-    if (Number(precio) < 0) {
+    if (Number(precio) < 0 || Number.isNaN(Number(precio))) {
         return "El precio del servicio no puede ser negativo.";
     }
 
@@ -54,6 +63,13 @@ function manejarErrorOracle(error, res, mensajeBase) {
         });
     }
 
+    if (error.errorNum === 20001 || error.errorNum === 20999) {
+        return res.status(404).json({
+            message: "Servicio no encontrado",
+            error: error.message,
+        });
+    }
+
     if (error.errorNum === 2292) {
         return res.status(409).json({
             message:
@@ -65,6 +81,13 @@ function manejarErrorOracle(error, res, mensajeBase) {
     if (error.errorNum === 2290 || error.errorNum === 1400) {
         return res.status(400).json({
             message: "Los datos no cumplen una restricción de la base de datos.",
+            error: error.message,
+        });
+    }
+
+    if (error.errorNum === 12899) {
+        return res.status(400).json({
+            message: "Uno de los campos supera la longitud permitida por la base de datos.",
             error: error.message,
         });
     }
@@ -88,25 +111,63 @@ router.get("/", async (req, res) => {
 
         const result = await connection.execute(
             `
-      SELECT
-        TRIM(idServicio) AS "id",
-        nombre AS "nombre",
-        tipoServicio AS "tipoServicio",
-        precio AS "precio",
-        descripcion AS "descripcion",
-        activo AS "activo"
-      FROM CATALOGO_SERVICIOS
-      WHERE (:soloActivos = 0 OR activo = 'S')
-      ORDER BY nombre
-      `,
+            BEGIN
+                PKG_SERVICIOS.pr_listar_servicios(
+                    :p_soloActivos,
+                    :p_cursor
+                );
+            END;
+            `,
             {
-                soloActivos: soloActivos ? 1 : 0,
+                p_soloActivos: soloActivos ? 1 : 0,
+                p_cursor: outCursor(),
             }
         );
 
-        res.json(result.rows);
+        const rows = await cursorToRows(result.outBinds.p_cursor);
+
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando servicios");
+    } finally {
+        if (connection) await connection.close();
+    }
+});
+
+router.get("/:id", async (req, res) => {
+    let connection;
+
+    const id = normalizarId(req.params.id);
+
+    try {
+        connection = await getConnection();
+
+        const result = await connection.execute(
+            `
+            BEGIN
+                PKG_SERVICIOS.pr_obtener_servicio(
+                    :p_idServicio,
+                    :p_cursor
+                );
+            END;
+            `,
+            {
+                p_idServicio: id,
+                p_cursor: outCursor(),
+            }
+        );
+
+        const rows = await cursorToRows(result.outBinds.p_cursor);
+
+        if (rows.length === 0) {
+            return res.status(404).json({
+                message: "Servicio no encontrado",
+            });
+        }
+
+        res.json(rows[0]);
+    } catch (error) {
+        manejarErrorOracle(error, res, "Error consultando servicio");
     } finally {
         if (connection) await connection.close();
     }
@@ -136,37 +197,37 @@ router.post("/", async (req, res) => {
     try {
         connection = await getConnection();
 
-        await connection.execute(
+        const result = await connection.execute(
             `
-      INSERT INTO CATALOGO_SERVICIOS (
-        idServicio,
-        nombre,
-        tipoServicio,
-        precio,
-        descripcion,
-        activo
-      ) VALUES (
-        :id,
-        :nombre,
-        :tipoServicio,
-        :precio,
-        :descripcion,
-        :activo
-      )
-      `,
+            BEGIN
+                PKG_SERVICIOS.pr_insertar_servicio(
+                    :p_idServicio,
+                    :p_nombre,
+                    :p_tipoServicio,
+                    :p_precio,
+                    :p_descripcion,
+                    :p_activo,
+                    :p_idServ_out
+                );
+            END;
+            `,
             {
-                id: id.trim(),
-                nombre: nombre.trim(),
-                tipoServicio,
-                precio: Number(precio),
-                descripcion: descripcion?.trim() || null,
-                activo,
+                p_idServicio: normalizarId(id),
+                p_nombre: nombre.trim(),
+                p_tipoServicio: tipoServicio,
+                p_precio: Number(precio),
+                p_descripcion: normalizarTexto(descripcion),
+                p_activo: activo,
+                p_idServ_out: outString(30),
             },
             { autoCommit: true }
         );
 
         res.status(201).json({
+            ok: true,
+            action: "CREATED",
             message: "Servicio creado correctamente",
+            id: result.outBinds.p_idServ_out,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error creando servicio");
@@ -178,7 +239,7 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
     let connection;
 
-    const id = req.params.id;
+    const id = normalizarId(req.params.id);
 
     const {
         nombre,
@@ -202,34 +263,36 @@ router.put("/:id", async (req, res) => {
 
         const result = await connection.execute(
             `
-      UPDATE CATALOGO_SERVICIOS
-      SET
-        nombre = :nombre,
-        tipoServicio = :tipoServicio,
-        precio = :precio,
-        descripcion = :descripcion,
-        activo = :activo
-      WHERE idServicio = :id
-      `,
+            BEGIN
+                PKG_SERVICIOS.pr_modificar_servicio(
+                    :p_idServicio,
+                    :p_nombre,
+                    :p_tipoServicio,
+                    :p_precio,
+                    :p_descripcion,
+                    :p_activo,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
             {
-                id,
-                nombre: nombre.trim(),
-                tipoServicio,
-                precio: Number(precio),
-                descripcion: descripcion?.trim() || null,
-                activo,
+                p_idServicio: id,
+                p_nombre: nombre.trim(),
+                p_tipoServicio: tipoServicio,
+                p_precio: Number(precio),
+                p_descripcion: normalizarTexto(descripcion),
+                p_activo: activo,
+                p_filas_afectadas: outNumber(),
             },
             { autoCommit: true }
         );
 
-        if (result.rowsAffected === 0) {
-            return res.status(404).json({
-                message: "Servicio no encontrado",
-            });
-        }
-
         res.json({
+            ok: true,
+            action: "UPDATED",
             message: "Servicio actualizado correctamente",
+            id,
+            filasAfectadas: result.outBinds.p_filas_afectadas,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error actualizando servicio");
@@ -241,28 +304,33 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
     let connection;
 
-    const id = req.params.id;
+    const id = normalizarId(req.params.id);
 
     try {
         connection = await getConnection();
 
         const result = await connection.execute(
             `
-      DELETE FROM CATALOGO_SERVICIOS
-      WHERE idServicio = :id
-      `,
-            { id },
+            BEGIN
+                PKG_SERVICIOS.pr_eliminar_servicio(
+                    :p_idServicio,
+                    :p_filas_afectadas
+                );
+            END;
+            `,
+            {
+                p_idServicio: id,
+                p_filas_afectadas: outNumber(),
+            },
             { autoCommit: true }
         );
 
-        if (result.rowsAffected === 0) {
-            return res.status(404).json({
-                message: "Servicio no encontrado",
-            });
-        }
-
         res.json({
+            ok: true,
+            action: "DELETED",
             message: "Servicio eliminado correctamente",
+            id,
+            filasAfectadas: result.outBinds.p_filas_afectadas,
         });
     } catch (error) {
         manejarErrorOracle(error, res, "Error eliminando servicio");
