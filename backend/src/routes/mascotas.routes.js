@@ -9,10 +9,79 @@ const {
     outString,
     normalizarTexto,
     normalizarId,
-    normalizarRows,
 } = require("../plsql");
 
 const sexosValidos = ["M", "H", null, ""];
+
+/**
+ * Convierte las filas que vienen desde Oracle/PLSQL
+ * a los nombres que espera el frontend.
+ */
+function mapMascota(row) {
+    return {
+        id:
+            row.id ||
+            row.ID ||
+            row.codigoMascota ||
+            row.CODIGOMASCOTA,
+
+        clienteId:
+            row.clienteId ||
+            row.CLIENTEID ||
+            row.idCliente ||
+            row.IDCLIENTE,
+
+        clienteNombre:
+            row.clienteNombre ||
+            row.CLIENTENOMBRE ||
+            row.nombreCliente ||
+            row.NOMBRECLIENTE ||
+            row.dueno ||
+            row.DUENO,
+
+        nombre:
+            row.nombre ||
+            row.NOMBRE ||
+            row.nombreMascota ||
+            row.NOMBREMASCOTA,
+
+        fechaNacimiento:
+            row.fechaNacimiento ||
+            row.FECHANACIMIENTO ||
+            row.fecha_nacimiento ||
+            row.FECHA_NACIMIENTO ||
+            null,
+
+        sexo:
+            row.sexo ||
+            row.SEXO ||
+            null,
+
+        peso:
+            row.peso ||
+            row.PESO ||
+            null,
+
+        especie:
+            row.especie ||
+            row.ESPECIE ||
+            null,
+
+        raza:
+            row.raza ||
+            row.RAZA ||
+            null,
+
+        estadoSalud:
+            row.estadoSalud ||
+            row.ESTADOSALUD ||
+            row.estado_salud ||
+            row.ESTADO_SALUD ||
+            row.estado ||
+            row.ESTADO ||
+            null,
+    };
+}
 
 function validarFecha(fecha) {
     if (!fecha) return true;
@@ -107,6 +176,9 @@ function manejarErrorOracle(error, res, mensajeBase) {
     });
 }
 
+/**
+ * GET /api/mascotas
+ */
 router.get("/", async (req, res) => {
     let connection;
 
@@ -125,8 +197,9 @@ router.get("/", async (req, res) => {
         );
 
         const rows = await cursorToRows(result.outBinds.p_cursor);
+        const mascotas = rows.map(mapMascota);
 
-        res.json(normalizarRows(rows));
+        res.json(mascotas);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando mascotas");
     } finally {
@@ -134,6 +207,9 @@ router.get("/", async (req, res) => {
     }
 });
 
+/**
+ * GET /api/mascotas/:id
+ */
 router.get("/:id", async (req, res) => {
     let connection;
 
@@ -165,7 +241,7 @@ router.get("/:id", async (req, res) => {
             });
         }
 
-        res.json(normalizarRows(rows)[0]);
+        res.json(mapMascota(rows[0]));
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando mascota");
     } finally {
@@ -173,6 +249,9 @@ router.get("/:id", async (req, res) => {
     }
 });
 
+/**
+ * POST /api/mascotas
+ */
 router.post("/", async (req, res) => {
     let connection;
 
@@ -245,6 +324,9 @@ router.post("/", async (req, res) => {
     }
 });
 
+/**
+ * PUT /api/mascotas/:id
+ */
 router.put("/:id", async (req, res) => {
     let connection;
 
@@ -322,6 +404,9 @@ router.put("/:id", async (req, res) => {
     }
 });
 
+/**
+ * DELETE /api/mascotas/:id
+ */
 router.delete("/:id", async (req, res) => {
     let connection;
 

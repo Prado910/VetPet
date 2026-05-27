@@ -27,10 +27,10 @@ router.get("/resumen", async (req, res) => {
 
     const result = await connection.execute(
       `
-            BEGIN
-                PKG_DASHBOARD.pr_resumen_dashboard(:p_cursor);
-            END;
-            `,
+      BEGIN
+          PKG_DASHBOARD.pr_resumen_dashboard(:p_cursor);
+      END;
+      `,
       {
         p_cursor: outCursor(),
       }
@@ -57,10 +57,10 @@ router.get("/citas-hoy", async (req, res) => {
 
     const result = await connection.execute(
       `
-            BEGIN
-                PKG_DASHBOARD.pr_citas_hoy(:p_cursor);
-            END;
-            `,
+      BEGIN
+          PKG_DASHBOARD.pr_citas_hoy(:p_cursor);
+      END;
+      `,
       {
         p_cursor: outCursor(),
       }
@@ -68,7 +68,7 @@ router.get("/citas-hoy", async (req, res) => {
 
     const rows = await cursorToRows(result.outBinds.p_cursor);
 
-    res.json(normalizarRows(rows));
+    res.json(rows);
   } catch (error) {
     manejarErrorOracle(error, res, "Error consultando citas de hoy");
   } finally {
@@ -92,13 +92,13 @@ router.get("/actividad-reciente", async (req, res) => {
 
     const result = await connection.execute(
       `
-            BEGIN
-                PKG_DASHBOARD.pr_actividad_reciente(
-                    :p_limite,
-                    :p_cursor
-                );
-            END;
-            `,
+      BEGIN
+          PKG_DASHBOARD.pr_actividad_reciente(
+              :p_limite,
+              :p_cursor
+          );
+      END;
+      `,
       {
         p_limite: limite,
         p_cursor: outCursor(),
@@ -107,7 +107,7 @@ router.get("/actividad-reciente", async (req, res) => {
 
     const rows = await cursorToRows(result.outBinds.p_cursor);
 
-    res.json(normalizarRows(rows));
+    res.json(rows);
   } catch (error) {
     manejarErrorOracle(error, res, "Error consultando actividad reciente");
   } finally {

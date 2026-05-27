@@ -211,7 +211,7 @@ router.get("/:id/medicamentos", async (req, res) => {
         );
 
         const rows = await cursorToRows(result.outBinds.p_cursor);
-        res.json(normalizarRows(rows));
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando medicamentos del tratamiento");
     } finally {
@@ -403,7 +403,7 @@ router.get("/", async (req, res) => {
         );
 
         const rows = await cursorToRows(result.outBinds.p_cursor);
-        res.json(normalizarRows(rows));
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando tratamientos");
     } finally {
@@ -442,7 +442,7 @@ router.get("/:id", async (req, res) => {
             });
         }
 
-        res.json(normalizarRows(rows)[0]);
+        res.json(rows[0] || {});
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando tratamiento");
     } finally {

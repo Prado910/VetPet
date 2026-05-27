@@ -9,7 +9,6 @@ const {
     outString,
     normalizarTexto,
     normalizarId,
-    normalizarRows,
 } = require("../plsql");
 
 const tiposEmpleadoValidos = ["VETERINARIO", "RECEPCIONISTA"];
@@ -301,7 +300,7 @@ router.get("/veterinarios", async (req, res) => {
         );
 
         const rows = await cursorToRows(result.outBinds.p_cursor);
-        res.json(normalizarRows(rows));
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando veterinarios");
     } finally {
@@ -331,7 +330,7 @@ router.get("/recepcionistas", async (req, res) => {
         );
 
         const rows = await cursorToRows(result.outBinds.p_cursor);
-        res.json(normalizarRows(rows));
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando recepcionistas");
     } finally {
@@ -357,7 +356,7 @@ router.get("/", async (req, res) => {
         );
 
         const rows = await cursorToRows(result.outBinds.p_cursor);
-        res.json(normalizarRows(rows));
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando empleados");
     } finally {

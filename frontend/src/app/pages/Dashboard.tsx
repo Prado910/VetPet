@@ -139,6 +139,8 @@ function normalizarIngresos(data: any) {
           item.ingresosPagados ||
           item.INGRESOS ||
           item.INGRESOSPAGADOS ||
+          item.total ||
+          item.TOTAL ||
           0,
       ),
     }));
@@ -155,6 +157,8 @@ function normalizarIngresos(data: any) {
             data.INGRESOSPAGADOS ||
             data.ingresos ||
             data.INGRESOS ||
+            data.total ||
+            data.TOTAL ||
             0,
         ),
       },

@@ -9,7 +9,6 @@ const {
     outString,
     normalizarTexto,
     normalizarId,
-    normalizarRows,
 } = require("../plsql");
 
 const estadosDiagnosticoValidos = ["PRESUNTIVO", "CONFIRMADO", "DESCARTADO"];
@@ -142,7 +141,7 @@ router.get("/", async (req, res) => {
 
         const rows = await cursorToRows(result.outBinds.p_cursor);
 
-        res.json(normalizarRows(rows));
+        res.json(rows);
     } catch (error) {
         manejarErrorOracle(error, res, "Error consultando diagnósticos");
     } finally {
