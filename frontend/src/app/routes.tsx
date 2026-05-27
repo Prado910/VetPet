@@ -12,6 +12,8 @@ import { Facturacion } from './pages/Facturacion';
 import { Reportes } from './pages/Reportes';
 import { Empleados } from './pages/Empleados';
 import { Configuracion } from './pages/Configuracion';
+import { DiccDatos } from './pages/DiccDatos';
+
 
 export const router = createBrowserRouter([
   {
@@ -61,5 +63,9 @@ export const router = createBrowserRouter([
   {
     path: '/configuracion',
     element: <Layout><Configuracion /></Layout>,
+  },
+  {
+    path: '/diccionario',
+    element: <Layout><DiccDatos /></Layout>,
   },
 ]);

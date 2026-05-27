@@ -12,7 +12,8 @@ import {
   Receipt,
   BarChart3,
   UserCog,
-  Settings
+  Settings,
+  BookOpen
 } from 'lucide-react';
 
 const menuItems = [
@@ -27,7 +28,8 @@ const menuItems = [
   { path: '/facturacion', label: 'Facturación', icon: Receipt },
   { path: '/reportes', label: 'Reportes', icon: BarChart3 },
   { path: '/empleados', label: 'Empleados', icon: UserCog },
-  { path: '/configuracion', label: 'Configuración', icon: Settings }
+  { path: '/configuracion', label: 'Configuración', icon: Settings },
+  { path: '/diccionario', label: 'Diccionario de Datos', icon: BookOpen },
 ];
 
 export function Sidebar() {

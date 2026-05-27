@@ -16,7 +16,7 @@ const tratamientosRoutes = require("./routes/tratamientos.routes");
 const facturasRoutes = require("./routes/facturas.routes");
 const dashboardRoutes = require("./routes/dashboard.routes");
 const reportesRoutes = require("./routes/reportes.routes");
-
+const diccionarioRoutes = require("./routes/diccionario.routes");
 const app = express();
 
 app.use(cors());
